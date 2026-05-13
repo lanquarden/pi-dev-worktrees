@@ -8,6 +8,10 @@
  * 4. devcontainer.enabled && !starting → probe, wrap with devcontainer exec
  * 5. worktree.path set → prepend cd <path> &&
  * 6. fallthrough → pass through unchanged
+ *
+ * cd safety: wherever a cd is prepended (rules 4+5), we use cdSafe() which
+ * emits a clear diagnostic on failure instead of silently passing the wrong
+ * cwd to the command.
  */
 
 import { join } from "node:path";
@@ -16,6 +20,28 @@ import type { WorktreesState } from "./session.js";
 
 /** Timeout in ms after which a still-starting container is considered stuck. */
 const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Shell-safe single-quote wrapping.
+ */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Build a cd guard that fails loudly when the directory doesn't exist or is
+ * inaccessible, then runs the command. Using this instead of bare `cd X && cmd`
+ * ensures the user always sees which path failed and why.
+ *
+ * Produces:
+ *   cd '/the/path' || { echo "pi-worktrees: cannot cd to '/the/path': $?" >&2; exit 1; }; <cmd>
+ */
+export function cdSafe(dir: string, cmd: string): string {
+  const q = shellQuote(dir);
+  return (
+    `cd ${q} || { echo "pi-worktrees: cannot cd to ${q} (exit $?)" >&2; exit 1; }; ${cmd}`
+  );
+}
 
 /**
  * Build a human-readable "container not ready" error message.
@@ -76,13 +102,6 @@ function containerNotReadyMessage(
 }
 
 /**
- * Shell-safe single-quote wrapping.
- */
-export function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-/**
  * Apply bash intercept routing to a command.
  * Returns the (possibly modified) command string.
  */
@@ -121,31 +140,33 @@ export async function applyBashIntercept(
     }
 
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
-    // Use the host path for --workspace-folder (devcontainer CLI needs it to
-    // locate the container). For the inner working directory, use the container-
-    // side path (remoteWorkspaceFolder from the startup log), which may differ
-    // when devcontainer.json uses a non-transparent mount (e.g. /workspaces/name).
+    // --workspace-folder must be the host path (devcontainer CLI requirement).
+    // The inner working directory uses the container-side path
+    // (remoteWorkspaceFolder from the startup log), which may differ from the
+    // host path when the devcontainer uses a non-transparent mount.
     const hostWorkspace = dc.workspace;
     const containerWorkspace = dc.remoteWorkspaceFolder ?? hostWorkspace;
 
-    // Map the worktree host path to its container-side equivalent.
-    // Worktrees live under <hostWorkspace>/.pi/worktrees/<branch>;
-    // replace the host prefix with the container prefix.
+    // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
     if (state.worktree?.path) {
+      // Map worktree host path → container-side path by replacing the host
+      // workspace prefix with the container workspace prefix.
       const relative = state.worktree.path.startsWith(hostWorkspace)
         ? state.worktree.path.slice(hostWorkspace.length)
         : "";
       const containerWorktreePath = relative
         ? containerWorkspace + relative
         : state.worktree.path; // fallback: hope paths already match
-      inner = `cd ${shellQuote(containerWorktreePath)} && ${cmd}`;
+      inner = cdSafe(containerWorktreePath, cmd);
     } else {
-      inner = cmd;
+      // No worktree: run at the container workspace root.
+      // cdSafe ensures we get a clear error if the mount is wrong.
+      inner = cdSafe(containerWorkspace, cmd);
     }
 
     // Escape inner for sh -c '...'
-    const innerEscaped = inner.replace(/'/g, "'\\''" );
+    const innerEscaped = inner.replace(/'/g, "'\\''");
     return (
       `devcontainer exec` +
       ` --workspace-folder ${shellQuote(hostWorkspace)}` +
@@ -154,9 +175,9 @@ export async function applyBashIntercept(
     );
   }
 
-  // Rule 5: worktree active — prepend cd
+  // Rule 5: worktree active — cd to worktree with failure guard
   if (state.worktree?.path) {
-    return `cd ${shellQuote(state.worktree.path)} && ${cmd}`;
+    return cdSafe(state.worktree.path, cmd);
   }
 
   // Rule 6: pass through unchanged

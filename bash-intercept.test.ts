@@ -263,9 +263,12 @@ describe("Rule 5 — worktree active, no container", () => {
     worktree: { branch: "feature/foo", path: "/project/.pi/worktrees/feature/foo" },
   };
 
-  it("prepends cd to the worktree path", async () => {
+  it("prepends cd (with failure guard) to the worktree path", async () => {
     const result = await intercept("npm test", worktreeState);
-    expect(result).toBe("cd '/project/.pi/worktrees/feature/foo' && npm test");
+    // cdSafe: cd '<path>' || { echo "pi-worktrees: ..." >&2; exit 1; }; <cmd>
+    expect(result).toContain("cd '/project/.pi/worktrees/feature/foo'");
+    expect(result).toContain("pi-worktrees: cannot cd to");
+    expect(result).toContain("npm test");
     expect(probe).not.toHaveBeenCalled();
   });
 
@@ -292,14 +295,13 @@ describe("Rule 6 — no worktree, no container — pass through", () => {
 // ── shellQuote helper ─────────────────────────────────────────────────────────
 
 describe("shellQuote — single-quote wrapping with internal quote escaping", () => {
-  // Access via re-export or inline test on the wrapped output
   it("wraps path with spaces correctly in Rule 5 output", async () => {
     const s: WorktreesState = {
       worktree: { branch: "b", path: "/tmp/my path/here" },
     };
     const result = await intercept("ls", s);
-    // Should be: cd '/tmp/my path/here' && ls
-    expect(result).toBe("cd '/tmp/my path/here' && ls");
+    expect(result).toContain("cd '/tmp/my path/here'");
+    expect(result).toContain("ls");
   });
 
   it("escapes single-quotes in paths", async () => {
@@ -309,5 +311,86 @@ describe("shellQuote — single-quote wrapping with internal quote escaping", ()
     const result = await intercept("ls", s);
     // Single quotes inside path should be escaped as '\''
     expect(result).toContain("'\\''");
+  });
+});
+
+// ── cdSafe helper ─────────────────────────────────────────────────────────────
+
+import { cdSafe, shellQuote } from "./bash-intercept.js";
+
+describe("cdSafe — guarded cd with clear failure message", () => {
+  it("includes the target path in the failure message", () => {
+    const result = cdSafe("/some/path", "ls");
+    expect(result).toContain("/some/path");
+    expect(result).toContain("pi-worktrees: cannot cd to");
+  });
+
+  it("includes the original command after the guard", () => {
+    const result = cdSafe("/some/path", "npm test");
+    expect(result).toContain("npm test");
+  });
+
+  it("exits 1 on cd failure (not silently proceeds)", () => {
+    const result = cdSafe("/no/such/dir", "echo hi");
+    expect(result).toContain("exit 1");
+    expect(result).toContain(">&2");
+  });
+
+  it("succeeds for an existing directory", async () => {
+    const { execSync } = await import("node:child_process");
+    const cmd = cdSafe("/tmp", "pwd");
+    const out = execSync(`sh -c ${shellQuote(cmd)}`, { encoding: "utf8" });
+    expect(out.trim()).toBe("/tmp");
+  });
+
+  it("fails with a clear message for a missing directory", async () => {
+    const { execSync } = await import("node:child_process");
+    const cmd = cdSafe("/nonexistent/path/xyz", "echo should-not-run");
+    let stderr = "";
+    try {
+      execSync(`sh -c ${shellQuote(cmd)}`, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (e: unknown) {
+      stderr = (e as { stderr: string }).stderr ?? "";
+    }
+    expect(stderr).toContain("pi-worktrees: cannot cd to");
+    expect(stderr).toContain("/nonexistent/path/xyz");
+  });
+});
+
+// ── Rule 4: container, no worktree — cds to containerWorkspace ────────────────
+
+describe("Rule 4 — container, no worktree — always cds to containerWorkspace", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    startupOutcome.mockReturnValue({ outcome: null });
+    probe.mockReturnValue(true);
+    tail.mockReturnValue("");
+  });
+
+  it("cds to remoteWorkspaceFolder when set", async () => {
+    const state: WorktreesState = {
+      devcontainer: {
+        enabled: true,
+        workspace: ROOT,
+        starting: false,
+        remoteWorkspaceFolder: "/workspaces/myrepo",
+      },
+    };
+    const result = await intercept("pwd", state);
+    expect(result).toContain("/workspaces/myrepo");
+    expect(result).toContain("pi-worktrees: cannot cd to");
+    expect(result).toContain("pwd");
+  });
+
+  it("falls back to host workspace path when no remoteWorkspaceFolder", async () => {
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("pwd", state);
+    expect(result).toContain(`/project`);
+    expect(result).toContain("pwd");
   });
 });
