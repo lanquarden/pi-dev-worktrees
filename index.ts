@@ -2,21 +2,18 @@
  * pi-worktrees — Pi extension for branch workspace isolation.
  *
  * Provides:
- * - Git worktree management via wtp (/worktree command + worktree_set tool)
- * - Devcontainer targeting per project (/devcontainer command + devcontainer_control tool)
+ * - Git worktree management via wtp (/worktree command)
+ * - Devcontainer targeting per project (/devcontainer command)
  * - Bash tool interception to route commands to the active workspace
  * - Dashboard events for external integrations
  *
- * Commands are for interactive TUI use.
- * Tools mirror the same logic so the LLM / dashboard can invoke them directly.
+ * Commands work in both TUI and dashboard (via useRpcKeeper).
  */
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
 
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
@@ -350,122 +347,7 @@ export default function (pi: ExtensionAPI) {
     (event.input as { command: string }).command = await applyBashIntercept(cmd, state, projectRoot);
   });
 
-  // ── Tools (callable from dashboard / LLM) ──
-
-  pi.registerTool({
-    name: "worktree_set",
-    label: "Worktree Set",
-    description: "Create or switch to a git worktree for a branch, or disable worktree mode. Use action='status' to show current state.",
-    promptSnippet: "Create, switch, or disable a git worktree for the current session",
-    parameters: Type.Object({
-      action: StringEnum(["on", "off", "status"] as const, { description: "'on' to activate a branch worktree, 'off' to disable, 'status' to query" }),
-      branch: Type.Optional(Type.String({ description: "Branch name (required when action='on')" })),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      let result: ActionResult;
-
-      if (params.action === "status") {
-        result = worktreeStatus();
-      } else if (params.action === "off") {
-        result = worktreeOff(pi);
-        if (result.ok) ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-      } else {
-        if (!params.branch)
-          result = { ok: false, message: "branch parameter is required when action='on'" };
-        else {
-          result = worktreeSet(params.branch, pi);
-          if (result.ok) ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-        }
-      }
-
-      return {
-        content: [{ type: "text", text: result.message }],
-        details: { ok: result.ok, state: { ...state } },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "devcontainer_control",
-    label: "Devcontainer Control",
-    description: "Enable or disable devcontainer targeting for the current session. When enabled, all bash commands run inside the project devcontainer.",
-    promptSnippet: "Start, stop, or check the status of devcontainer targeting",
-    parameters: Type.Object({
-      action: StringEnum(["on", "off", "status"] as const, { description: "'on' to start targeting the devcontainer, 'off' to stop, 'status' to query" }),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      let result: ActionResult;
-
-      if (params.action === "status") {
-        result = devcontainerStatus();
-      } else if (params.action === "off") {
-        result = devcontainerOff(pi);
-        if (result.ok) ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-      } else {
-        result = devcontainerOn(pi);
-        if (result.ok) ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-      }
-
-      return {
-        content: [{ type: "text", text: result.message }],
-        details: { ok: result.ok, state: { ...state } },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "workspaces_status",
-    label: "Workspaces Status",
-    description: "Show all git worktrees under .pi/worktrees/ and the devcontainer status for the current project.",
-    promptSnippet: "List all worktrees and devcontainer status for the current project",
-    parameters: Type.Object({}),
-    async execute() {
-      const snapshot = workspacesSnapshot();
-      return {
-        content: [{ type: "text", text: snapshot }],
-        details: { state: { ...state } },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "workspace_remove",
-    label: "Workspace Remove",
-    description: "Remove a specific git worktree by branch name. Use force=true to remove even if it has uncommitted changes.",
-    promptSnippet: "Remove a git worktree by branch name",
-    parameters: Type.Object({
-      branch: Type.String({ description: "Branch name of the worktree to remove (e.g. 'feature/auth')" }),
-      force: Type.Optional(Type.Boolean({ description: "Force removal even with uncommitted changes (default: false)" })),
-    }),
-    async execute(_id, params) {
-      if (!projectRoot) return { content: [{ type: "text", text: "Not in a git repository" }], details: { ok: false } };
-      if (!isWtpAvailable()) return { content: [{ type: "text", text: "wtp not found" }], details: { ok: false } };
-
-      const worktreePath = join(projectRoot, ".pi", "worktrees", params.branch);
-      if (!existsSync(worktreePath))
-        return { content: [{ type: "text", text: `Worktree not found: ${params.branch}` }], details: { ok: false } };
-
-      try {
-        const forceFlag = params.force ? "--force " : "";
-        execSync(`wtp remove ${forceFlag}${shellEscapeArg(params.branch)}`, {
-          cwd: projectRoot, encoding: "utf8",
-        });
-        emitWorkspaceRemoved(pi, params.branch, worktreePath, projectRoot);
-
-        if (state.worktree?.branch === params.branch) {
-          state.worktree = undefined;
-          saveState(pi, state);
-          emitStateUpdate(pi, state);
-        }
-
-        return { content: [{ type: "text", text: `Removed worktree: ${params.branch}` }], details: { ok: true } };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Failed to remove: ${String(err)}` }], details: { ok: false } };
-      }
-    },
-  });
-
-  // ── Commands (interactive TUI) ─────────────
+  // ── Commands (TUI + dashboard via useRpcKeeper) ───────────────────────
 
   pi.registerCommand("worktree", {
     description: "Manage git worktrees. Usage: /worktree [branch | off]",
