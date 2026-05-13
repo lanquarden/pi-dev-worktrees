@@ -232,7 +232,36 @@ export function clearStartupLog(projectRoot: string): void {
  * Start the devcontainer in the background (detached, fire-and-forget).
  * Stdout and stderr are written to .pi/devcontainer-up.log.
  */
-export function startContainer(projectRoot: string): void {
+/**
+ * Build the argv array for `devcontainer up`.
+ * Extracted so tests can assert on the exact flags without spawning a process.
+ */
+export function buildStartArgs(
+  projectRoot: string,
+  overridePath: string,
+  removeExisting: boolean,
+): string[] {
+  const args = [
+    "up",
+    "--workspace-folder",
+    projectRoot,
+    "--override-config",
+    overridePath,
+  ];
+  if (removeExisting) args.push("--remove-existing-container");
+  return args;
+}
+
+/**
+ * Start the devcontainer in the background (detached, fire-and-forget).
+ * Stdout and stderr are written to .pi/devcontainer-up.log.
+ *
+ * @param removeExisting - Pass true to force-recreate the container even if
+ *   one already exists (passes --remove-existing-container to devcontainer up).
+ *   Use this when you need a clean start, e.g. after config changes or when
+ *   a stale container from a previous session is suspected.
+ */
+export function startContainer(projectRoot: string, removeExisting = false): void {
   const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
   const logPath = containerLogPath(projectRoot);
 
@@ -242,13 +271,7 @@ export function startContainer(projectRoot: string): void {
   const logFd = openSync(logPath, "a");
   const child = spawn(
     "devcontainer",
-    [
-      "up",
-      "--workspace-folder",
-      projectRoot,
-      "--override-config",
-      overridePath,
-    ],
+    buildStartArgs(projectRoot, overridePath, removeExisting),
     {
       detached: true,
       stdio: ["ignore", logFd, logFd],

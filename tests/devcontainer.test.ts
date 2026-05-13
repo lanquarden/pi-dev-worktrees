@@ -405,3 +405,40 @@ describe("generateOverrideJson — force regeneration", () => {
     expect(parsed.remoteUser).toBe("my-user"); // unchanged
   });
 });
+
+// ── buildStartArgs ────────────────────────────────────────────────────────────
+
+import { buildStartArgs } from "../src/devcontainer.js";
+
+describe("buildStartArgs", () => {
+  const ROOT = "/my/project";
+  const OVERRIDE = "/my/project/.pi/devcontainer.override.json";
+
+  it("includes --workspace-folder and --override-config without removeExisting", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, false);
+    expect(args).toContain("up");
+    expect(args).toContain("--workspace-folder");
+    expect(args).toContain(ROOT);
+    expect(args).toContain("--override-config");
+    expect(args).toContain(OVERRIDE);
+    expect(args).not.toContain("--remove-existing-container");
+  });
+
+  it("appends --remove-existing-container when removeExisting=true", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, true);
+    expect(args).toContain("--remove-existing-container");
+  });
+
+  it("does NOT include --remove-existing-container when removeExisting=false", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, false);
+    expect(args).not.toContain("--remove-existing-container");
+  });
+
+  it("order: up, --workspace-folder, path, --override-config, path [, --remove-existing-container]", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, true);
+    expect(args[0]).toBe("up");
+    expect(args[args.indexOf("--workspace-folder") + 1]).toBe(ROOT);
+    expect(args[args.indexOf("--override-config") + 1]).toBe(OVERRIDE);
+    expect(args[args.length - 1]).toBe("--remove-existing-container");
+  });
+});

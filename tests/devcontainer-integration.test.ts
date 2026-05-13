@@ -38,14 +38,15 @@ const skipIntegration = process.env.SKIP_INTEGRATION === "1" || !dockerAvailable
  * Run devcontainer up with the given workspace and override config.
  * Returns the parsed JSON outcome line from stdout.
  */
-function devcontainerUp(workspaceFolder: string, overridePath: string): {
+function devcontainerUp(workspaceFolder: string, overridePath: string, removeExisting = false): {
   outcome: string;
   containerId?: string;
   remoteWorkspaceFolder?: string;
 } {
+  const removeFlag = removeExisting ? " --remove-existing-container" : "";
   // Run devcontainer up, capturing all stdout
   const output = execSync(
-    `devcontainer up --workspace-folder ${shellQuote(workspaceFolder)} --override-config ${shellQuote(overridePath)}`,
+    `devcontainer up --workspace-folder ${shellQuote(workspaceFolder)} --override-config ${shellQuote(overridePath)}${removeFlag}`,
     { encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] }
   );
   // The last JSON line is the outcome
@@ -160,5 +161,20 @@ describe.skipIf(skipIntegration)("devcontainer integration", () => {
 
     const content = readFileSync(containerPath, "utf8").trim();
     expect(content).toBe("hello from container");
+  });
+
+  it("--remove-existing-container recreates and returns a new containerId", () => {
+    // Reproduces the 'stale 2-weeks-old container' scenario: /devcontainer on
+    // should always force-recreate so the override config is applied cleanly.
+    expect(containerId).toBeTruthy();
+    const overridePath = join(testWorkspace, ".pi", "devcontainer.override.json");
+
+    const result = devcontainerUp(testWorkspace, overridePath, /* removeExisting */ true);
+    expect(result.outcome).toBe("success");
+    expect(result.containerId).toBeTruthy();
+    // Container was replaced — new ID
+    expect(result.containerId).not.toBe(containerId);
+    // Update so afterAll stops the right container
+    containerId = result.containerId;
   });
 });

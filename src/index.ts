@@ -231,17 +231,17 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }
 
-  const alive = probeContainer(projectRoot);
-  if (alive) {
-    const { remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
-    state.devcontainer = { enabled: true, workspace: projectRoot, starting: false, remoteWorkspaceFolder };
-    saveState(pi, state);
-    emitStateUpdate(pi, state);
-    return { ok: true, message: "Devcontainer already running — targeting enabled" };
-  }
+  // Stop any existing container and clear the stale log before starting fresh.
+  // This ensures the override config (just regenerated above) is always applied
+  // to a new container — not silently ignored because devcontainer up reused a
+  // pre-existing one that was started with a different configuration.
+  stopContainer(projectRoot);
+  clearStartupLog(projectRoot);
 
   try {
-    startContainer(projectRoot);
+    // --remove-existing-container forces devcontainer up to remove and recreate
+    // rather than reusing a stale container from a previous session.
+    startContainer(projectRoot, /* removeExisting */ true);
   } catch (err) {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
   }
