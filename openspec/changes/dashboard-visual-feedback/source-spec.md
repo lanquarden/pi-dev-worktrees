@@ -105,6 +105,7 @@ interface WorktreesState {
     enabled:   boolean;
     workspace: string;   // absolute project root
     starting?: boolean;  // true while `devcontainer up` is in flight
+    startedAt?: number;  // Unix ms timestamp when startup was initiated
   };
 }
 ```
@@ -169,7 +170,13 @@ interface WorktreesState {
 7. Emit `pi-worktrees:devcontainer-starting { workspace, cwd }`
 8. Notify: `"Container starting… bash commands will queue until it's ready"`
 
-**Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`, re-probe `devcontainer exec ... --override-config .pi/devcontainer.override.json -- echo ok`. On success: set `starting: false`, save state, emit `pi-worktrees:devcontainer-ready`. Until ready: replace the bash command with `echo "Container still starting, please retry in a moment." && exit 1`.
+**Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`, re-probe `devcontainer exec ... --override-config .pi/devcontainer.override.json -- echo ok`. On success: set `starting: false`, save state, emit `pi-worktrees:devcontainer-ready`. Until ready: replace the bash command with an error that includes:
+- Elapsed time since `startedAt`
+- The last 30 lines of `.pi/devcontainer-up.log` (always, so the LLM can diagnose immediately)
+- A `/devcontainer logs` hint for the full log
+- After 5 minutes: a "stuck" warning with a restart suggestion (`/devcontainer off` then `/devcontainer on`)
+
+Container startup log is captured to `.pi/devcontainer-up.log` (truncated on each new start attempt).
 
 **`/devcontainer off` flow:**
 1. Set `state.devcontainer.enabled = false`, save
@@ -180,7 +187,16 @@ interface WorktreesState {
 
 ### §6a — `.pi/devcontainer.override.json`
 
-Generated on first `/devcontainer on` call (skipped if file already exists, so users can customise it freely). Passed to every `devcontainer up` and `devcontainer exec` call via `--override-config`.
+Generated on first `/devcontainer on` call (or regenerated if the existing file is the old
+2-field stub from a previous version of pi-worktrees).
+
+Because `--override-config` **replaces** the entire devcontainer config rather than merging
+on top of it, the override must be a complete, valid devcontainer config. The extension
+generates it by:
+
+1. Reading the base `devcontainer.json` from the project (stripping `//` and `/* */` comments
+   which devcontainer files commonly include).
+2. Overlaying the workspace-mount fields:
 
 ```json
 {
@@ -189,9 +205,17 @@ Generated on first `/devcontainer on` call (skipped if file already exists, so u
 }
 ```
 
-**Effect:** The container mounts the project root at the **same absolute path as on the host**. Inside the container, `.pi/worktrees/<branch>/` is accessible at the same path as on the host. No path-mapping logic is needed in the extension.
+3. Writing the merged result as `.pi/devcontainer.override.json`.
 
-**Why a merge override:** The user's `devcontainer.json` is left untouched. If it already uses the transparent pattern, the override is a no-op. If not, the override ensures transparent paths regardless of what the base config does.
+**Effect:** All base config fields (`image`, `dockerFile`, `containerUser`, `runArgs`, etc.) are
+preserved. The workspace-mount fields ensure paths inside the container match the host exactly
+(transparent mount). The `devcontainer` CLI validates the override as a standalone config, so
+the container source field (`image`/`dockerFile`/`dockerComposeFile`) must be present.
+
+**Regeneration of old stubs:** If the file already exists and contains only `workspaceMount`
+and `workspaceFolder` (the old 2-field stub written by a previous version of this extension),
+it is deleted and regenerated. Otherwise the file is left untouched — the user may have
+customised it.
 
 The file is added to `.gitignore` alongside `.pi/worktrees/` on first generation.
 
@@ -248,8 +272,8 @@ Registered via `pi.on("tool_call", ...)`, only fires for `event.toolName === "ba
 |---|-----------|--------|
 | 1 | `cmd.match(/^HOST:/i)` | Strip `HOST:` prefix; pass through unchanged (host, original cwd) |
 | 2 | `cmd.match(/^(git|gh|hub) /)` | Pass through unchanged (run on host) |
-| 3 | `devcontainer.enabled && devcontainer.starting` | Replace cmd: `echo "Container starting…" && exit 1` |
-| 4 | `devcontainer.enabled && !devcontainer.starting` | Re-probe liveness; if ready wrap with `devcontainer exec …`; if probe fails → rule 3 |
+| 3 | `devcontainer.enabled && devcontainer.starting` | Replace cmd with error: elapsed time + log tail + restart hints (`exit 1`) |
+| 4 | `devcontainer.enabled && !devcontainer.starting` | Re-probe liveness; if ready wrap with `devcontainer exec …`; if probe fails → same error as rule 3 |
 | 5 | `worktree.path` set | Prepend `cd <worktree-path> && ` |
 | 6 | — | Pass through unchanged |
 

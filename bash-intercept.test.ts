@@ -129,6 +129,20 @@ describe("Rule 3 — devcontainer enabled and starting", () => {
     const result = await intercept("npm test", startingState(startedAt));
     expect(result).toContain("/devcontainer off");
   });
+
+  it("includes log tail immediately (before timeout) so LLM can diagnose without extra command", async () => {
+    tail.mockReturnValue("Error: missing image field");
+    const startedAt = Date.now() - 10_000; // only 10s in, well before timeout
+    const result = await intercept("npm test", startingState(startedAt));
+    // Log tail should be included regardless of whether we're past the timeout
+    expect(result).toContain("Error: missing image field");
+  });
+
+  it("mentions /devcontainer logs hint even when not stuck", async () => {
+    tail.mockReturnValue("");
+    const result = await intercept("npm test", startingState(Date.now()));
+    expect(result).toContain("/devcontainer logs");
+  });
 });
 
 // ── Rule 4: devcontainer running — probe and wrap ─────────────────────────────

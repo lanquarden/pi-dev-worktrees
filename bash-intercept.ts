@@ -19,7 +19,8 @@ const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Build a human-readable "container not ready" error message.
- * Includes elapsed time and, when stuck, the last lines of the startup log.
+ * Always includes the startup log tail so the LLM can diagnose the problem
+ * immediately without needing to run /devcontainer logs separately.
  */
 function containerNotReadyMessage(
   projectRoot: string,
@@ -32,19 +33,24 @@ function containerNotReadyMessage(
 
   const isStuck = elapsed !== undefined && elapsed > CONTAINER_START_TIMEOUT_MS;
 
+  const logTail = tailContainerLog(projectRoot, 30);
+  const logSection = logTail
+    ? `\n\nStartup log (.pi/devcontainer-up.log):\n${logTail}`
+    : "\n\nNo startup log found. The devcontainer CLI may have failed silently.";
+
   if (isStuck) {
-    const logTail = tailContainerLog(projectRoot, 30);
-    const logSection = logTail
-      ? `\n\nLast startup log lines:\n${logTail}\n\nFull log: .pi/devcontainer-up.log`
-      : "\n\nNo startup log found. The devcontainer CLI may have failed silently.";
     return (
       `Container startup appears stuck (${elapsedStr}, timeout: ${CONTAINER_START_TIMEOUT_MS / 60000}min).` +
-      `\nRun /devcontainer off then /devcontainer on to restart, or check the log.` +
+      `\nRun /devcontainer off then /devcontainer on to restart.` +
       logSection
     );
   }
 
-  return `Container still starting (${elapsedStr}). Retry in a moment, or run /devcontainer logs to check progress.`;
+  return (
+    `Container not ready (${elapsedStr}).` +
+    `\nRun /devcontainer logs to view full log, or /devcontainer off + on to restart.` +
+    logSection
+  );
 }
 
 /**

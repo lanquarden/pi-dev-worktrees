@@ -207,7 +207,7 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
 
   try {
-    generateOverrideJson(projectRoot);
+    generateOverrideJson(projectRoot, configPath);
   } catch (err) {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }
