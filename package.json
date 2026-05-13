@@ -1,0 +1,12 @@
+{
+  "name": "pi-worktrees",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
