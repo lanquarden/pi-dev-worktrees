@@ -2,16 +2,20 @@
  * bash-intercept.ts — Bash command routing logic for pi-worktrees.
  *
  * Decision table (first match wins):
- * 1. HOST: prefix → strip prefix, pass through unchanged
- * 2. git/gh/hub commands → pass through unchanged
+ * 1. HOST: prefix → strip prefix, pass through on host, routing="host"
+ * 2. git/gh/hub commands → pass through on host unchanged, routing="host"
  * 3. devcontainer.enabled && starting → replace with "still starting" error
- * 4. devcontainer.enabled && !starting → probe, wrap with devcontainer exec
- * 5. worktree.path set → prepend cd <path> &&
- * 6. fallthrough → pass through unchanged
+ * 4. devcontainer.enabled && !starting → probe, wrap with devcontainer exec, routing="container"
+ * 5. worktree.path set → prepend cd <path> &&, routing="host"
+ * 6. fallthrough → pass through unchanged, routing="host"
  *
  * cd safety: wherever a cd is prepended (rules 4+5), we use cdSafe() which
  * emits a clear diagnostic on failure instead of silently passing the wrong
  * cwd to the command.
+ *
+ * The returned InterceptResult includes a `routing` field so callers
+ * (index.ts tool_result hook) can prefix the LLM-visible output with
+ * "[host]" or "[container]" for consistent grounding.
  */
 
 import { join } from "node:path";
@@ -20,6 +24,25 @@ import type { WorktreesState } from "./session.js";
 
 /** Timeout in ms after which a still-starting container is considered stuck. */
 const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Where a bash command was routed to.
+ *
+ * - "container" — wrapped in devcontainer exec; ran inside the container
+ * - "host"      — ran directly on the host (HOST: prefix, git, worktree cd, passthrough)
+ * - "error"     — replaced with an error message (container not ready, startup failed)
+ */
+export type BashRouting = "container" | "host" | "error";
+
+/**
+ * Result of applyBashIntercept.
+ * `command` is the (possibly rewritten) command to execute.
+ * `routing` tells the caller where the command will run.
+ */
+export interface InterceptResult {
+  command: string;
+  routing: BashRouting;
+}
 
 /**
  * Shell-safe single-quote wrapping.
@@ -103,21 +126,21 @@ function containerNotReadyMessage(
 
 /**
  * Apply bash intercept routing to a command.
- * Returns the (possibly modified) command string.
+ * Returns an InterceptResult with the (possibly modified) command and routing metadata.
  */
 export async function applyBashIntercept(
   cmd: string,
   state: WorktreesState,
   projectRoot: string,
-): Promise<string> {
-  // Rule 1: HOST: prefix — strip and pass through
+): Promise<InterceptResult> {
+  // Rule 1: HOST: prefix — strip and pass through on host
   if (/^HOST:/i.test(cmd)) {
-    return cmd.replace(/^HOST:/i, "").trimStart();
+    return { command: cmd.replace(/^HOST:/i, "").trimStart(), routing: "host" };
   }
 
-  // Rule 2: git/gh/hub — pass through unchanged (run on host)
+  // Rule 2: git/gh/hub — pass through unchanged (always run on host)
   if (/^(git|gh|hub) /.test(cmd)) {
-    return cmd;
+    return { command: cmd, routing: "host" };
   }
 
   const dc = state.devcontainer;
@@ -125,7 +148,7 @@ export async function applyBashIntercept(
   // Rule 3: devcontainer enabled and still starting
   if (dc?.enabled && dc.starting) {
     const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
-    return `printf '%s\n' ${shellQuote(msg)} && exit 1`;
+    return { command: `printf '%s\n' ${shellQuote(msg)} && exit 1`, routing: "error" };
   }
 
   // Rule 4: devcontainer enabled and not starting — probe and wrap
@@ -136,7 +159,7 @@ export async function applyBashIntercept(
     const alive = outcome === "success" || probeContainer(projectRoot);
     if (!alive) {
       const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
-      return `printf '%s\n' ${shellQuote(msg)} && exit 1`;
+      return { command: `printf '%s\n' ${shellQuote(msg)} && exit 1`, routing: "error" };
     }
 
     const hostWorkspace = dc.workspace;
@@ -180,29 +203,35 @@ export async function applyBashIntercept(
     // (e.g. when a pre-existing container started with a different config is
     // reused by devcontainer up).
     if (containerId) {
-      return (
-        displayComment +
-        `devcontainer exec` +
-        ` --container-id ${shellQuote(containerId)}` +
-        ` -- sh -c '${innerEscaped}'`
-      );
+      return {
+        command: (
+          displayComment +
+          `devcontainer exec` +
+          ` --container-id ${shellQuote(containerId)}` +
+          ` -- sh -c '${innerEscaped}'`
+        ),
+        routing: "container",
+      };
     }
 
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
-    return (
-      displayComment +
-      `devcontainer exec` +
-      ` --workspace-folder ${shellQuote(hostWorkspace)}` +
-      ` --override-config ${shellQuote(overridePath)}` +
-      ` -- sh -c '${innerEscaped}'`
-    );
+    return {
+      command: (
+        displayComment +
+        `devcontainer exec` +
+        ` --workspace-folder ${shellQuote(hostWorkspace)}` +
+        ` --override-config ${shellQuote(overridePath)}` +
+        ` -- sh -c '${innerEscaped}'`
+      ),
+      routing: "container",
+    };
   }
 
   // Rule 5: worktree active — cd to worktree with failure guard
   if (state.worktree?.path) {
-    return cdSafe(state.worktree.path, cmd);
+    return { command: cdSafe(state.worktree.path, cmd), routing: "host" };
   }
 
   // Rule 6: pass through unchanged
-  return cmd;
+  return { command: cmd, routing: "host" };
 }

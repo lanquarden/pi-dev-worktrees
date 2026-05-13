@@ -18,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
+import type { BashRouting } from "./bash-intercept.js";
 import { registerDashboardUi } from "./dashboard-ui.js";
 import { ensureWtpYml, createOrTargetWorktree } from "./worktrees.js";
 import {
@@ -44,6 +45,10 @@ import {
 
 // Module-level project root — resolved once in session_start
 let projectRoot = "";
+
+// Last bash routing decision — read by the tool_result hook to prefix output.
+// Reset to null before each tool_call so unrelated tool results don't inherit it.
+let lastBashRouting: BashRouting | null = null;
 
 // ──────────────────────────────────────────────
 // Pure helpers
@@ -337,17 +342,20 @@ export default function (pi: ExtensionAPI) {
     if (state.worktree) {
       lines.push(`- Branch: \`${state.worktree.branch}\``);
       lines.push(`- Worktree path: \`${state.worktree.path}\``);
-      lines.push("- Bash commands run inside this worktree directory");
+      lines.push("- Bash commands are run inside this worktree directory on the host");
     }
     if (state.devcontainer?.enabled) {
       const status = state.devcontainer.starting ? "starting…" : "running";
-      lines.push(`- Devcontainer: ${status} (project root)`);
+      lines.push(`- Devcontainer: ${status}`);
       if (state.devcontainer.starting) {
         lines.push("- Bash commands will fail until container is ready — run /devcontainer logs to check startup progress");
       } else {
-        lines.push("- Bash commands execute inside the container");
+        lines.push("- **All bash commands are automatically executed inside the container**");
+        lines.push("- Tool results are prefixed with [container] or [host] so you always know where a command ran");
+        lines.push("- To run a single command on the host instead, prefix it with `HOST:` (e.g. `HOST: docker ps`)");
+        lines.push("- git/gh commands always run on the host regardless of devcontainer state");
+        lines.push("- If you need to temporarily bypass container routing for several commands, use `HOST:` on each one");
       }
-      lines.push("- Prefix a command with `HOST:` to run it on the host instead");
     }
 
     return {
@@ -402,7 +410,29 @@ export default function (pi: ExtensionAPI) {
     }
 
     const cmd = (event.input as { command: string }).command;
-    (event.input as { command: string }).command = await applyBashIntercept(cmd, state, projectRoot);
+    lastBashRouting = null; // reset before each call
+    const result = await applyBashIntercept(cmd, state, projectRoot);
+    lastBashRouting = result.routing;
+    (event.input as { command: string }).command = result.command;
+  });
+
+  // ── tool_result: prefix output with routing context ─────────────────
+  // Gives the LLM a clear, consistent signal about where each command ran.
+  // Dashboard renders the original LLM tool-call (shows "uv lock --check"),
+  // so the prefix in the result is the main grounding signal for both TUI
+  // and dashboard sessions.
+  pi.on("tool_result", async (event) => {
+    if (event.toolName !== "bash" || lastBashRouting === null) return;
+    const routing = lastBashRouting;
+    lastBashRouting = null; // consume
+    if (routing === "error") return; // error text is self-explanatory
+
+    const prefix = routing === "container" ? "[container]\n" : "[host]\n";
+    const updated = event.content.map((block) => {
+      if (block.type !== "text") return block;
+      return { ...block, text: prefix + block.text };
+    });
+    return { content: updated };
   });
 
   // ── Commands (TUI + dashboard via useRpcKeeper) ───────────────────────

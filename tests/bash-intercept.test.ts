@@ -16,6 +16,7 @@ vi.mock("../src/devcontainer.js", () => ({
 import { probeContainer, tailContainerLog, readStartupOutcome } from "../src/devcontainer.js";
 import { applyBashIntercept } from "../src/bash-intercept.js";
 import type { WorktreesState } from "../src/session.js";
+import type { BashRouting } from "../src/bash-intercept.js";
 
 const probe = probeContainer as ReturnType<typeof vi.fn>;
 const tail = tailContainerLog as ReturnType<typeof vi.fn>;
@@ -27,10 +28,14 @@ function emptyState(): WorktreesState {
   return {};
 }
 
-// ── Helper ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 async function intercept(cmd: string, state: WorktreesState): Promise<string> {
-  return applyBashIntercept(cmd, state, ROOT);
+  return (await applyBashIntercept(cmd, state, ROOT)).command;
+}
+
+async function interceptRouting(cmd: string, state: WorktreesState): Promise<BashRouting> {
+  return (await applyBashIntercept(cmd, state, ROOT)).routing;
 }
 
 // ── Rule 1: HOST: prefix ─────────────────────────────────────────────────────
@@ -535,5 +540,62 @@ describe("Rule 4 — display comment shows original command in TUI", () => {
     const lines = result.split("\n");
     expect(lines[0]).toBe("# [container] uv lock --check");
     expect(lines[1]).toContain("devcontainer exec");
+  });
+});
+
+// ── Routing metadata ──────────────────────────────────────────────────────────
+
+describe("InterceptResult routing metadata", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tail.mockReturnValue("");
+    startupOutcome.mockReturnValue({ outcome: null });
+  });
+
+  it("HOST: prefix → routing='host'", async () => {
+    expect(await interceptRouting("HOST: npm install", emptyState())).toBe("host");
+  });
+
+  it("git command → routing='host'", async () => {
+    expect(await interceptRouting("git status", emptyState())).toBe("host");
+  });
+
+  it("gh command → routing='host'", async () => {
+    expect(await interceptRouting("gh pr list", emptyState())).toBe("host");
+  });
+
+  it("passthrough (no worktree, no container) → routing='host'", async () => {
+    expect(await interceptRouting("ls", emptyState())).toBe("host");
+  });
+
+  it("worktree only (no container) → routing='host'", async () => {
+    const state: WorktreesState = {
+      worktree: { branch: "feat", path: "/project/.pi/worktrees/feat" },
+    };
+    expect(await interceptRouting("ls", state)).toBe("host");
+  });
+
+  it("container enabled not starting (alive) → routing='container'", async () => {
+    startupOutcome.mockReturnValue({ outcome: "success", containerId: "abc" });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    expect(await interceptRouting("npm test", state)).toBe("container");
+  });
+
+  it("container starting → routing='error'", async () => {
+    tail.mockReturnValue("");
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: true, startedAt: Date.now() },
+    };
+    expect(await interceptRouting("npm test", state)).toBe("error");
+  });
+
+  it("container enabled but dead → routing='error'", async () => {
+    probe.mockReturnValue(false);
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    expect(await interceptRouting("npm test", state)).toBe("error");
   });
 });
