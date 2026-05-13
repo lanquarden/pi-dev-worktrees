@@ -161,12 +161,12 @@ describe("Rule 3 — devcontainer enabled and starting", () => {
     expect(result).toContain("/devcontainer off");
   });
 
-  it("shows 'started but not accepting exec' when outcome=success but exec not yet ready", async () => {
+  it("shows 'up per log but state not yet updated' when outcome=success", async () => {
     tail.mockReturnValue("outcome:success line");
     startupOutcome.mockReturnValue({ outcome: "success" });
     const result = await intercept("npm test", startingState(Date.now() - 5_000));
-    expect(result).toContain("started but not yet accepting exec");
-    expect(result).toContain("retry automatically");
+    expect(result).toContain("state not yet updated");
+    expect(result).toContain("resolve automatically");
   });
 });
 

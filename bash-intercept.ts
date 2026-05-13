@@ -51,10 +51,10 @@ function containerNotReadyMessage(
   }
 
   if (outcome === "success") {
-    // Container up but exec probe hasn't responded yet
+    // Container up per log but tool_call handler hasn't transitioned state yet.
+    // This should only happen on the very first command after startup completes.
     return (
-      `Container started but not yet accepting exec commands (${elapsedStr}).` +
-      `\nThe extension will retry automatically on the next bash command.` +
+      `Container is up (per startup log) but state not yet updated — this should resolve automatically.` +
       `\nIf this persists, run /devcontainer off + on to reset.` +
       logSection
     );

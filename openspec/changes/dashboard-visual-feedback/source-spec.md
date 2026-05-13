@@ -173,8 +173,8 @@ interface WorktreesState {
 **Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`:
 1. Parse `.pi/devcontainer-up.log` for the terminal JSON outcome line (`{"outcome":"success"|"error",...}`):
    - `outcome: "error"` → mark container disabled, notify user, let command run on host
-   - `outcome: "success"` → run exec probe (10s timeout) to verify exec is accepting; if alive, mark ready; if not yet, report "started but not yet accepting exec"
-   - `outcome: null` (still running) → run exec probe as fallback
+   - `outcome: "success"` → **trust the log immediately** — mark container ready without an exec probe (exec can be slow on first invocation and would block the agent unnecessarily)
+   - `outcome: null` (still running) → run exec probe (10s timeout) as fallback
 2. Until marked ready: replace the bash command with an error that includes: elapsed time, startup outcome context, and last 30 lines of `.pi/devcontainer-up.log`
 3. After 5 minutes with no outcome: show "stuck" warning with restart suggestion
 

@@ -357,19 +357,19 @@ export default function (pi: ExtensionAPI) {
           "warning",
         );
       } else if (outcome === "success") {
-        // Container is up — verify exec works then mark ready
-        const alive = probeContainer(projectRoot);
-        if (alive) {
-          state.devcontainer.starting = false;
-          saveState(pi, state);
-          emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
-          emitStateUpdate(pi, state);
-          ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-          ctx.ui.notify("Devcontainer is ready", "info");
-        }
-        // else: log says success but exec still not responding — keep starting=true
+        // devcontainer up completed successfully — trust the log, mark ready.
+        // We do NOT run an exec probe here: devcontainer exec can be slow on
+        // first invocation and would block the agent for up to 10 seconds.
+        // If exec genuinely fails, the actual command will surface the error.
+        state.devcontainer.starting = false;
+        saveState(pi, state);
+        emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
+        emitStateUpdate(pi, state);
+        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.notify("Devcontainer is ready", "info");
       } else {
-        // No outcome yet — do a direct exec probe as before
+        // No outcome line yet — container still starting; try a direct exec probe
+        // as a fallback (handles cases where devcontainer up doesn't write JSON).
         const alive = probeContainer(projectRoot);
         if (alive) {
           state.devcontainer.starting = false;
