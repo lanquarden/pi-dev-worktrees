@@ -18,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
+import { registerDashboardUi } from "./dashboard-ui.js";
 import { ensureWtpYml, createOrTargetWorktree } from "./worktrees.js";
 import {
   findDevcontainerConfig,
@@ -303,6 +304,7 @@ export default function (pi: ExtensionAPI) {
     } catch { /* non-fatal */ }
 
     ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+    registerDashboardUi(pi, projectRoot);
   });
 
   // ── before_agent_start ─────────────────────

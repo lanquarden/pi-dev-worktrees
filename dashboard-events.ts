@@ -5,6 +5,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorktreesState } from "./session.js";
+import { invalidateDashboardUi } from "./dashboard-ui.js";
 
 export function emitWorkspaceCreated(
   pi: ExtensionAPI,
@@ -88,4 +89,5 @@ export function emitDevcontainerStopped(
 
 export function emitStateUpdate(pi: ExtensionAPI, state: WorktreesState): void {
   pi.events.emit("pi-worktrees:state", state);
+  invalidateDashboardUi(pi);
 }

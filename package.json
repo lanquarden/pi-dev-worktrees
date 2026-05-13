@@ -5,6 +5,9 @@
   "dependencies": {
     "js-yaml": "^4.1.0"
   },
+  "devDependencies": {
+    "@blackbelt-technology/pi-dashboard-shared": "*"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
