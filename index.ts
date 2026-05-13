@@ -25,6 +25,8 @@ import {
   generateOverrideJson,
   probeContainer,
   startContainer,
+  tailContainerLog,
+  containerLogPath,
 } from "./devcontainer.js";
 import {
   emitWorkspaceCreated,
@@ -224,7 +226,7 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
   }
 
-  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true };
+  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now() };
   saveState(pi, state);
   emitDevcontainerStarting(pi, projectRoot, projectRoot);
   emitStateUpdate(pi, state);
@@ -273,7 +275,7 @@ function workspacesSnapshot(): string {
       lines.push("  ● Running at project root");
       lines.push("  Use HOST: prefix to bypass container");
     } else {
-      lines.push(state.devcontainer.starting ? "  ◌ Starting…" : "  ✗ Not responding (may have stopped)");
+      lines.push(state.devcontainer.starting ? "  ◌ Starting… (run /devcontainer logs to check progress)" : "  ✗ Not responding (may have stopped — run /devcontainer logs)");
     }
   } else {
     lines.push("  ○ Off (not targeting container)");
@@ -320,7 +322,11 @@ export default function (pi: ExtensionAPI) {
     if (state.devcontainer?.enabled) {
       const status = state.devcontainer.starting ? "starting…" : "running";
       lines.push(`- Devcontainer: ${status} (project root)`);
-      lines.push("- Bash commands execute inside the container");
+      if (state.devcontainer.starting) {
+        lines.push("- Bash commands will fail until container is ready — run /devcontainer logs to check startup progress");
+      } else {
+        lines.push("- Bash commands execute inside the container");
+      }
       lines.push("- Prefix a command with `HOST:` to run it on the host instead");
     }
 
@@ -384,7 +390,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("devcontainer", {
-    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off]",
+    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | logs]",
     handler: async (args, ctx) => {
       const arg = args?.trim();
       if (!arg) {
@@ -404,7 +410,17 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
-      ctx.ui.notify("Usage: /devcontainer [on | off]", "info");
+      if (arg === "logs") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const logTail = tailContainerLog(projectRoot, 50);
+        if (!logTail) {
+          ctx.ui.notify(`No startup log found. Expected at: ${containerLogPath(projectRoot)}`, "info");
+        } else {
+          ctx.ui.notify(logTail, "info");
+        }
+        return;
+      }
+      ctx.ui.notify("Usage: /devcontainer [on | off | logs]", "info");
     },
   });
 

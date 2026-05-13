@@ -14,6 +14,8 @@ export interface WorktreesState {
     enabled: boolean;
     workspace: string;
     starting?: boolean;
+    /** Unix ms timestamp when container startup was initiated */
+    startedAt?: number;
   };
 }
 

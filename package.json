@@ -2,11 +2,16 @@
   "name": "pi-worktrees",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
-    "@blackbelt-technology/pi-dashboard-shared": "*"
+    "@blackbelt-technology/pi-dashboard-shared": "*",
+    "vitest": "^2.1.9"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

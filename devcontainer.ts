@@ -3,7 +3,7 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { existsSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, appendFileSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 
 const OVERRIDE_JSON_CONTENT = JSON.stringify(
@@ -75,11 +75,23 @@ export function probeContainer(projectRoot: string): boolean {
   }
 }
 
+/** Path where `devcontainer up` stdout/stderr is captured. */
+export function containerLogPath(projectRoot: string): string {
+  return join(projectRoot, ".pi", "devcontainer-up.log");
+}
+
 /**
  * Start the devcontainer in the background (detached, fire-and-forget).
+ * Stdout and stderr are written to .pi/devcontainer-up.log.
  */
 export function startContainer(projectRoot: string): void {
   const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
+  const logPath = containerLogPath(projectRoot);
+
+  // Truncate log file before each new start attempt
+  writeFileSync(logPath, `--- devcontainer up started at ${new Date().toISOString()} ---\n`, "utf8");
+
+  const logFd = openSync(logPath, "a");
   const child = spawn(
     "devcontainer",
     [
@@ -91,11 +103,28 @@ export function startContainer(projectRoot: string): void {
     ],
     {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", logFd, logFd],
       cwd: projectRoot,
     },
   );
   child.unref();
+  closeSync(logFd);
+}
+
+/**
+ * Return the last N lines of the devcontainer startup log, or an empty string
+ * if no log exists yet.
+ */
+export function tailContainerLog(projectRoot: string, lines = 20): string {
+  const logPath = containerLogPath(projectRoot);
+  if (!existsSync(logPath)) return "";
+  try {
+    const content = readFileSync(logPath, "utf8");
+    const allLines = content.trimEnd().split("\n");
+    return allLines.slice(-lines).join("\n");
+  } catch {
+    return "";
+  }
 }
 
 /**

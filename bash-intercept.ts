@@ -11,8 +11,41 @@
  */
 
 import { join } from "node:path";
-import { probeContainer } from "./devcontainer.js";
+import { probeContainer, tailContainerLog } from "./devcontainer.js";
 import type { WorktreesState } from "./session.js";
+
+/** Timeout in ms after which a still-starting container is considered stuck. */
+const CONTAINER_START_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Build a human-readable "container not ready" error message.
+ * Includes elapsed time and, when stuck, the last lines of the startup log.
+ */
+function containerNotReadyMessage(
+  projectRoot: string,
+  startedAt: number | undefined,
+): string {
+  const elapsed = startedAt ? Date.now() - startedAt : undefined;
+  const elapsedStr = elapsed !== undefined
+    ? `${Math.floor(elapsed / 1000)}s elapsed`
+    : "unknown start time";
+
+  const isStuck = elapsed !== undefined && elapsed > CONTAINER_START_TIMEOUT_MS;
+
+  if (isStuck) {
+    const logTail = tailContainerLog(projectRoot, 30);
+    const logSection = logTail
+      ? `\n\nLast startup log lines:\n${logTail}\n\nFull log: .pi/devcontainer-up.log`
+      : "\n\nNo startup log found. The devcontainer CLI may have failed silently.";
+    return (
+      `Container startup appears stuck (${elapsedStr}, timeout: ${CONTAINER_START_TIMEOUT_MS / 60000}min).` +
+      `\nRun /devcontainer off then /devcontainer on to restart, or check the log.` +
+      logSection
+    );
+  }
+
+  return `Container still starting (${elapsedStr}). Retry in a moment, or run /devcontainer logs to check progress.`;
+}
 
 /**
  * Shell-safe single-quote wrapping.
@@ -44,14 +77,16 @@ export async function applyBashIntercept(
 
   // Rule 3: devcontainer enabled and still starting
   if (dc?.enabled && dc.starting) {
-    return `echo "Container still starting, please retry in a moment." && exit 1`;
+    const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
+    return `printf '%s\n' ${shellQuote(msg)} && exit 1`;
   }
 
   // Rule 4: devcontainer enabled and not starting — probe and wrap
   if (dc?.enabled && !dc.starting) {
     const alive = probeContainer(projectRoot);
     if (!alive) {
-      return `echo "Container still starting, please retry in a moment." && exit 1`;
+      const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
+      return `printf '%s\n' ${shellQuote(msg)} && exit 1`;
     }
 
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
