@@ -489,3 +489,51 @@ describe("Rule 4 — exec routing: --container-id vs --workspace-folder", () => 
     expect(result).not.toContain("/project/");
   });
 });
+
+// ── Rule 4: display comment ──────────────────────────────────────────────────
+
+describe("Rule 4 — display comment shows original command in TUI", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tail.mockReturnValue("");
+  });
+
+  it("prepends # [container] <cmd> comment when using --container-id", async () => {
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "abc123",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("uv lock --check", state);
+    expect(result).toMatch(/^# \[container\] uv lock --check\n/);
+  });
+
+  it("prepends # [container] <cmd> comment when falling back to --workspace-folder", async () => {
+    startupOutcome.mockReturnValue({ outcome: null });
+    probe.mockReturnValue(true);
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("npm test", state);
+    expect(result).toMatch(/^# \[container\] npm test\n/);
+  });
+
+  it("comment uses the ORIGINAL command, not the wrapped exec form", async () => {
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "abc123",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("uv lock --check", state);
+    // Comment shows original, rest shows devcontainer exec
+    const lines = result.split("\n");
+    expect(lines[0]).toBe("# [container] uv lock --check");
+    expect(lines[1]).toContain("devcontainer exec");
+  });
+});

@@ -168,6 +168,11 @@ export async function applyBashIntercept(
     // Escape inner for sh -c '...'
     const innerEscaped = inner.replace(/'/g, "'\\''");
 
+    // Prepend a shell comment with the original command so the TUI header shows
+    // something human-readable instead of the full devcontainer exec boilerplate.
+    // The shell ignores comment lines; it has no effect on execution.
+    const displayComment = `# [container] ${cmd}\n`;
+
     // Prefer --container-id when available — it requires no --workspace-folder
     // or --override-config repetition (all context is baked into the running
     // container), and avoids OCI chdir failures caused by a mismatch between
@@ -176,6 +181,7 @@ export async function applyBashIntercept(
     // reused by devcontainer up).
     if (containerId) {
       return (
+        displayComment +
         `devcontainer exec` +
         ` --container-id ${shellQuote(containerId)}` +
         ` -- sh -c '${innerEscaped}'`
@@ -184,6 +190,7 @@ export async function applyBashIntercept(
 
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
     return (
+      displayComment +
       `devcontainer exec` +
       ` --workspace-folder ${shellQuote(hostWorkspace)}` +
       ` --override-config ${shellQuote(overridePath)}` +
