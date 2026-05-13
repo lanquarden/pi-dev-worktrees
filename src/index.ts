@@ -393,7 +393,9 @@ export default function (pi: ExtensionAPI) {
         emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
         emitStateUpdate(pi, state);
         ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-        ctx.ui.notify("Devcontainer is ready", "info");
+        // No notify — the [container] prefix on the first tool result is
+        // sufficient; an inline notify card would mask the actual output
+        // in the dashboard.
       } else {
         // No outcome line yet — container still starting; try a direct exec probe
         // as a fallback (handles cases where devcontainer up doesn't write JSON).
@@ -404,7 +406,7 @@ export default function (pi: ExtensionAPI) {
           emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
           emitStateUpdate(pi, state);
           ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-          ctx.ui.notify("Devcontainer is ready", "info");
+          // No notify — same reason as above.
         }
       }
     }
