@@ -25,6 +25,8 @@ import {
   generateOverrideJson,
   probeContainer,
   startContainer,
+  stopContainer,
+  clearStartupLog,
   tailContainerLog,
   containerLogPath,
   readStartupOutcome,
@@ -184,14 +186,28 @@ function devcontainerStatus(): ActionResult {
 function devcontainerOff(pi: ExtensionAPI): ActionResult {
   if (!projectRoot) return { ok: false, message: "Not in a git repository" };
   const workspace = state.devcontainer?.workspace ?? projectRoot;
+
+  // Stop the actual Docker container so the next /devcontainer on starts fresh
+  // with the current override config. Clear the startup log so stale
+  // outcome:success doesn't short-circuit the next devcontainer up.
+  const { stopped, containerId } = stopContainer(projectRoot);
+  clearStartupLog(projectRoot);
+
   if (state.devcontainer) {
     state.devcontainer.enabled = false;
     state.devcontainer.starting = false;
+    state.devcontainer.remoteWorkspaceFolder = undefined;
   }
   saveState(pi, state);
   emitDevcontainerStopped(pi, workspace, projectRoot);
   emitStateUpdate(pi, state);
-  return { ok: true, message: `Devcontainer targeting off. Container still running at ${workspace}.` };
+
+  const stopNote = stopped
+    ? ` Container ${containerId ? containerId.slice(0, 12) : ""} stopped.`
+    : containerId
+    ? ` Could not stop container ${containerId.slice(0, 12)} — stop it manually if needed.`
+    : " No container ID found in log — container may still be running.";
+  return { ok: true, message: `Devcontainer targeting off.${stopNote}` };
 }
 
 function devcontainerOn(pi: ExtensionAPI): ActionResult {
@@ -208,7 +224,9 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
 
   try {
-    generateOverrideJson(projectRoot, configPath);
+    // Always regenerate the override on explicit /devcontainer on so it
+    // stays in sync with the current devcontainer.json.
+    generateOverrideJson(projectRoot, configPath, /* force */ true);
   } catch (err) {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }

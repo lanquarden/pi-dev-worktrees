@@ -182,9 +182,12 @@ Container startup log is captured to `.pi/devcontainer-up.log` (truncated on eac
 Exec probe timeout is 10 seconds (increased from 2s to handle slow first-exec after container start).
 
 **`/devcontainer off` flow:**
-1. Set `state.devcontainer.enabled = false`, save
-2. Emit `pi-worktrees:devcontainer-stopped`
-3. Notify: `"Devcontainer targeting off. Container still running at <workspace>."`
+1. Read `containerId` from `.pi/devcontainer-up.log` and run `docker stop <containerId>` (30s timeout, best-effort)
+2. Clear `.pi/devcontainer-up.log` (truncate to empty) so stale `outcome:success` cannot short-circuit the next `/devcontainer on`
+3. Clear `state.devcontainer.remoteWorkspaceFolder`
+4. Set `state.devcontainer.enabled = false`, save
+5. Emit `pi-worktrees:devcontainer-stopped`
+6. Notify with stop result: container ID stopped, or warning if stop failed
 
 ---
 

@@ -329,3 +329,79 @@ describe("readStartupOutcome", () => {
     expect(readStartupOutcome(dir).outcome).toBe("success");
   });
 });
+
+// ── clearStartupLog ───────────────────────────────────────────────────────────
+
+import { clearStartupLog } from "./devcontainer.js";
+
+describe("clearStartupLog", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTempDir();
+    mkdirSync(join(dir, ".pi"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("empties the log file when it exists", () => {
+    writeFileSync(containerLogPath(dir), '{"outcome":"success"}\n');
+    clearStartupLog(dir);
+    expect(readFileSync(containerLogPath(dir), "utf8")).toBe("");
+  });
+
+  it("does nothing (no throw) when log file does not exist", () => {
+    expect(() => clearStartupLog(dir)).not.toThrow();
+  });
+
+  it("after clearing, readStartupOutcome returns null", () => {
+    writeFileSync(containerLogPath(dir), '{"outcome":"success"}\n');
+    clearStartupLog(dir);
+    expect(readStartupOutcome(dir).outcome).toBeNull();
+  });
+});
+
+// ── generateOverrideJson force flag ──────────────────────────────────────────
+
+describe("generateOverrideJson — force regeneration", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTempDir();
+    mkdirSync(join(dir, ".pi"));
+    mkdirSync(join(dir, ".devcontainer"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("force=true regenerates even a user-customised override", () => {
+    const custom = {
+      image: "ubuntu:22.04",
+      workspaceFolder: "${localWorkspaceFolder}",
+      workspaceMount: "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+      remoteUser: "old-user",
+    };
+    writeFileSync(join(dir, ".pi", "devcontainer.override.json"), JSON.stringify(custom));
+    writeFileSync(join(dir, ".devcontainer", "devcontainer.json"), JSON.stringify({ image: "ubuntu:24.04" }));
+
+    generateOverrideJson(dir, undefined, /* force */ true);
+
+    const parsed = JSON.parse(readFileSync(join(dir, ".pi", "devcontainer.override.json"), "utf8"));
+    // Should be regenerated from the new base config
+    expect(parsed.image).toBe("ubuntu:24.04");
+    // remoteUser not in new base, so not present (or workspace overrides applied)
+    expect(parsed.workspaceFolder).toBe("${localWorkspaceFolder}");
+  });
+
+  it("force=false leaves user-customised override untouched", () => {
+    const custom = {
+      image: "ubuntu:22.04",
+      workspaceFolder: "${localWorkspaceFolder}",
+      workspaceMount: "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+      remoteUser: "my-user",
+    };
+    writeFileSync(join(dir, ".pi", "devcontainer.override.json"), JSON.stringify(custom));
+    writeFileSync(join(dir, ".devcontainer", "devcontainer.json"), JSON.stringify({ image: "ubuntu:24.04" }));
+
+    generateOverrideJson(dir, undefined, /* force */ false);
+
+    const parsed = JSON.parse(readFileSync(join(dir, ".pi", "devcontainer.override.json"), "utf8"));
+    expect(parsed.remoteUser).toBe("my-user"); // unchanged
+  });
+});

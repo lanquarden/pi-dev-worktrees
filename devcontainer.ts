@@ -45,7 +45,7 @@ export function findDevcontainerConfig(projectRoot: string): string | null {
  * If the file already exists it is left untouched — the user may have
  * customised it. Also ensures .pi/devcontainer.override.json is in .gitignore.
  */
-export function generateOverrideJson(projectRoot: string, configPath?: string): void {
+export function generateOverrideJson(projectRoot: string, configPath?: string, force = false): void {
   const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
 
   // If the file already exists, check whether it looks like the old 2-field
@@ -53,7 +53,8 @@ export function generateOverrideJson(projectRoot: string, configPath?: string): 
   // an older version of pi-worktrees that used --override-config as a merge
   // target; now we know it REPLACES the base config, so the override must be
   // a complete, valid devcontainer config. Delete the stub so it is rebuilt.
-  if (existsSync(overridePath)) {
+  // When force=true (explicit /devcontainer on), always regenerate.
+  if (existsSync(overridePath) && !force) {
     try {
       const existing = JSON.parse(readFileSync(overridePath, "utf8")) as Record<string, unknown>;
       const keys = Object.keys(existing);
@@ -150,6 +151,7 @@ export function readStartupOutcome(projectRoot: string): {
   outcome: "success" | "error" | null;
   message?: string;
   remoteWorkspaceFolder?: string;
+  containerId?: string;
 } {
   const logPath = containerLogPath(projectRoot);
   if (!existsSync(logPath)) return { outcome: null };
@@ -165,6 +167,7 @@ export function readStartupOutcome(projectRoot: string): {
         if (parsed.outcome === "success") {
           return {
             outcome: "success",
+            containerId: typeof parsed.containerId === "string" ? parsed.containerId : undefined,
             remoteWorkspaceFolder: typeof parsed.remoteWorkspaceFolder === "string"
               ? parsed.remoteWorkspaceFolder
               : undefined,
@@ -189,6 +192,40 @@ export function readStartupOutcome(projectRoot: string): {
 /** Path where `devcontainer up` stdout/stderr is captured. */
 export function containerLogPath(projectRoot: string): string {
   return join(projectRoot, ".pi", "devcontainer-up.log");
+}
+
+/**
+ * Stop the devcontainer by stopping the Docker container whose ID was recorded
+ * in the startup log. Falls back to a docker stop by label if no containerId.
+ * Errors are swallowed — stopping is best-effort.
+ */
+export function stopContainer(projectRoot: string): { stopped: boolean; containerId?: string } {
+  const { containerId } = readStartupOutcome(projectRoot);
+  if (containerId) {
+    try {
+      execSync(`docker stop ${shellQuote(containerId)}`, {
+        stdio: "ignore",
+        timeout: 30_000,
+      });
+      return { stopped: true, containerId };
+    } catch {
+      return { stopped: false, containerId };
+    }
+  }
+  return { stopped: false };
+}
+
+/**
+ * Clear the startup log so a subsequent /devcontainer on always runs
+ * `devcontainer up` fresh rather than short-circuiting on a stale outcome.
+ */
+export function clearStartupLog(projectRoot: string): void {
+  const logPath = containerLogPath(projectRoot);
+  if (existsSync(logPath)) {
+    try {
+      writeFileSync(logPath, "", "utf8");
+    } catch { /* best-effort */ }
+  }
 }
 
 /**
