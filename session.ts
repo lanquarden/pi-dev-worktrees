@@ -16,6 +16,13 @@ export interface WorktreesState {
     starting?: boolean;
     /** Unix ms timestamp when container startup was initiated */
     startedAt?: number;
+    /**
+     * The workspace folder path as it appears INSIDE the container.
+     * Read from the devcontainer up log (remoteWorkspaceFolder).
+     * May differ from workspace (host path) when the container uses a
+     * non-transparent mount (e.g. /workspaces/<name> instead of the host path).
+     */
+    remoteWorkspaceFolder?: string;
   };
 }
 

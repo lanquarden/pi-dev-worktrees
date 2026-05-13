@@ -292,9 +292,11 @@ describe("readStartupOutcome", () => {
     const log =
       "--- devcontainer up started at 2026-01-01T00:00:00Z ---\n" +
       "[2026-01-01T00:00:01Z] @devcontainers/cli 0.80.2\n" +
-      '{"outcome":"success","containerId":"abc123","remoteUser":"vscode","remoteWorkspaceFolder":"/project"}\n';
+      '{"outcome":"success","containerId":"abc123","remoteUser":"vscode","remoteWorkspaceFolder":"/workspaces/myrepo"}\n';
     writeFileSync(containerLogPath(dir), log);
-    expect(readStartupOutcome(dir).outcome).toBe("success");
+    const result = readStartupOutcome(dir);
+    expect(result.outcome).toBe("success");
+    expect(result.remoteWorkspaceFolder).toBe("/workspaces/myrepo");
   });
 
   it("detects error outcome and extracts message", () => {

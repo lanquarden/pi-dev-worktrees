@@ -215,7 +215,8 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
 
   const alive = probeContainer(projectRoot);
   if (alive) {
-    state.devcontainer = { enabled: true, workspace: projectRoot, starting: false };
+    const { remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
+    state.devcontainer = { enabled: true, workspace: projectRoot, starting: false, remoteWorkspaceFolder };
     saveState(pi, state);
     emitStateUpdate(pi, state);
     return { ok: true, message: "Devcontainer already running — targeting enabled" };
@@ -343,7 +344,7 @@ export default function (pi: ExtensionAPI) {
     if (state.devcontainer?.enabled && state.devcontainer.starting) {
       // Fast-path: check if the startup log already says success or error
       // before doing the slower exec probe.
-      const { outcome, message: outcomeMsg } = readStartupOutcome(projectRoot);
+      const { outcome, message: outcomeMsg, remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
       if (outcome === "error") {
         // Container failed to start — turn off targeting so commands run on host
         state.devcontainer.starting = false;
@@ -358,10 +359,10 @@ export default function (pi: ExtensionAPI) {
         );
       } else if (outcome === "success") {
         // devcontainer up completed successfully — trust the log, mark ready.
-        // We do NOT run an exec probe here: devcontainer exec can be slow on
-        // first invocation and would block the agent for up to 10 seconds.
-        // If exec genuinely fails, the actual command will surface the error.
         state.devcontainer.starting = false;
+        if (remoteWorkspaceFolder) {
+          state.devcontainer.remoteWorkspaceFolder = remoteWorkspaceFolder;
+        }
         saveState(pi, state);
         emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
         emitStateUpdate(pi, state);

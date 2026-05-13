@@ -121,21 +121,34 @@ export async function applyBashIntercept(
     }
 
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
-    const workspace = dc.workspace;
+    // Use the host path for --workspace-folder (devcontainer CLI needs it to
+    // locate the container). For the inner working directory, use the container-
+    // side path (remoteWorkspaceFolder from the startup log), which may differ
+    // when devcontainer.json uses a non-transparent mount (e.g. /workspaces/name).
+    const hostWorkspace = dc.workspace;
+    const containerWorkspace = dc.remoteWorkspaceFolder ?? hostWorkspace;
 
-    // If worktree is active, cd into it inside the container
+    // Map the worktree host path to its container-side equivalent.
+    // Worktrees live under <hostWorkspace>/.pi/worktrees/<branch>;
+    // replace the host prefix with the container prefix.
     let inner: string;
     if (state.worktree?.path) {
-      inner = `cd ${shellQuote(state.worktree.path)} && ${cmd}`;
+      const relative = state.worktree.path.startsWith(hostWorkspace)
+        ? state.worktree.path.slice(hostWorkspace.length)
+        : "";
+      const containerWorktreePath = relative
+        ? containerWorkspace + relative
+        : state.worktree.path; // fallback: hope paths already match
+      inner = `cd ${shellQuote(containerWorktreePath)} && ${cmd}`;
     } else {
       inner = cmd;
     }
 
     // Escape inner for sh -c '...'
-    const innerEscaped = inner.replace(/'/g, "'\\''");
+    const innerEscaped = inner.replace(/'/g, "'\\''" );
     return (
       `devcontainer exec` +
-      ` --workspace-folder ${shellQuote(workspace)}` +
+      ` --workspace-folder ${shellQuote(hostWorkspace)}` +
       ` --override-config ${shellQuote(overridePath)}` +
       ` -- sh -c '${innerEscaped}'`
     );

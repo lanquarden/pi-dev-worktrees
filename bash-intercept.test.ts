@@ -215,7 +215,7 @@ describe("Rule 4 — devcontainer enabled, not starting", () => {
     expect(result).not.toContain("devcontainer exec");
   });
 
-  it("wraps with cd to worktree when both active", async () => {
+  it("wraps with cd to worktree using host path when no remoteWorkspaceFolder", async () => {
     probe.mockReturnValue(true);
     const state: WorktreesState = {
       devcontainer: { enabled: true, workspace: ROOT, starting: false },
@@ -223,10 +223,28 @@ describe("Rule 4 — devcontainer enabled, not starting", () => {
     };
     const result = await intercept("npm test", state);
     expect(result).toContain("devcontainer exec");
-    // Inside the sh -c '...' wrapper, single quotes are escaped as '\''
     expect(result).toContain("/project/.pi/worktrees/feature/auth");
     expect(result).toContain("npm test");
   });
+
+  it("maps worktree path to container-side path when remoteWorkspaceFolder differs", async () => {
+    probe.mockReturnValue(true);
+    // Simulate: host=/project, container=/workspaces/myrepo
+    const state: WorktreesState = {
+      devcontainer: {
+        enabled: true,
+        workspace: ROOT,
+        starting: false,
+        remoteWorkspaceFolder: "/workspaces/myrepo",
+      },
+      worktree: { branch: "feature/auth", path: "/project/.pi/worktrees/feature/auth" },
+    };
+    const result = await intercept("npm test", state);
+    // cd should use container-side prefix, not host prefix
+    expect(result).toContain("/workspaces/myrepo/.pi/worktrees/feature/auth");
+    expect(result).not.toContain("cd '/project/");
+  });
+
 
   it("uses --override-config pointing at .pi/devcontainer.override.json", async () => {
     probe.mockReturnValue(true);

@@ -149,6 +149,7 @@ export function probeContainer(projectRoot: string): boolean {
 export function readStartupOutcome(projectRoot: string): {
   outcome: "success" | "error" | null;
   message?: string;
+  remoteWorkspaceFolder?: string;
 } {
   const logPath = containerLogPath(projectRoot);
   if (!existsSync(logPath)) return { outcome: null };
@@ -161,7 +162,14 @@ export function readStartupOutcome(projectRoot: string): {
       if (!line.startsWith("{")) continue;
       try {
         const parsed = JSON.parse(line) as Record<string, unknown>;
-        if (parsed.outcome === "success") return { outcome: "success" };
+        if (parsed.outcome === "success") {
+          return {
+            outcome: "success",
+            remoteWorkspaceFolder: typeof parsed.remoteWorkspaceFolder === "string"
+              ? parsed.remoteWorkspaceFolder
+              : undefined,
+          };
+        }
         if (parsed.outcome === "error") {
           return {
             outcome: "error",
