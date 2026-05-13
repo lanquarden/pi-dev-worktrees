@@ -119,18 +119,62 @@ export function stripJsonComments(json: string): string {
 
 /**
  * Probe whether the devcontainer is running.
- * Returns true if the container responds within 2 seconds.
+ * Returns true if the container responds within 10 seconds.
+ * Uses a longer timeout than a quick health-check because `devcontainer exec`
+ * can be slow on first invocation after the container has just started.
  */
 export function probeContainer(projectRoot: string): boolean {
   const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
   try {
     const result = execSync(
       `devcontainer exec --workspace-folder ${shellQuote(projectRoot)} --override-config ${shellQuote(overridePath)} -- echo ok`,
-      { timeout: 2000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      { timeout: 10_000, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     return result.trim().includes("ok");
   } catch {
     return false;
+  }
+}
+
+/**
+ * Read the startup outcome from .pi/devcontainer-up.log.
+ *
+ * `devcontainer up` prints a final JSON line on stdout:
+ *   {"outcome":"success","containerId":"...", ...}
+ *   {"outcome":"error","message":"...", ...}
+ *
+ * Returns the outcome string ("success", "error", or null if not yet written
+ * or not parseable).
+ */
+export function readStartupOutcome(projectRoot: string): {
+  outcome: "success" | "error" | null;
+  message?: string;
+} {
+  const logPath = containerLogPath(projectRoot);
+  if (!existsSync(logPath)) return { outcome: null };
+  try {
+    const content = readFileSync(logPath, "utf8");
+    // Scan from the end for a line that starts with '{' (the JSON summary line)
+    const lines = content.trimEnd().split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith("{")) continue;
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        if (parsed.outcome === "success") return { outcome: "success" };
+        if (parsed.outcome === "error") {
+          return {
+            outcome: "error",
+            message: typeof parsed.message === "string" ? parsed.message : undefined,
+          };
+        }
+      } catch {
+        // not valid JSON, keep scanning
+      }
+    }
+    return { outcome: null };
+  } catch {
+    return { outcome: null };
   }
 }
 

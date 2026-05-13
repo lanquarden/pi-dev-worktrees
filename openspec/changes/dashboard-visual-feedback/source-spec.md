@@ -170,13 +170,16 @@ interface WorktreesState {
 7. Emit `pi-worktrees:devcontainer-starting { workspace, cwd }`
 8. Notify: `"Container starting… bash commands will queue until it's ready"`
 
-**Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`, re-probe `devcontainer exec ... --override-config .pi/devcontainer.override.json -- echo ok`. On success: set `starting: false`, save state, emit `pi-worktrees:devcontainer-ready`. Until ready: replace the bash command with an error that includes:
-- Elapsed time since `startedAt`
-- The last 30 lines of `.pi/devcontainer-up.log` (always, so the LLM can diagnose immediately)
-- A `/devcontainer logs` hint for the full log
-- After 5 minutes: a "stuck" warning with a restart suggestion (`/devcontainer off` then `/devcontainer on`)
+**Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`:
+1. Parse `.pi/devcontainer-up.log` for the terminal JSON outcome line (`{"outcome":"success"|"error",...}`):
+   - `outcome: "error"` → mark container disabled, notify user, let command run on host
+   - `outcome: "success"` → run exec probe (10s timeout) to verify exec is accepting; if alive, mark ready; if not yet, report "started but not yet accepting exec"
+   - `outcome: null` (still running) → run exec probe as fallback
+2. Until marked ready: replace the bash command with an error that includes: elapsed time, startup outcome context, and last 30 lines of `.pi/devcontainer-up.log`
+3. After 5 minutes with no outcome: show "stuck" warning with restart suggestion
 
 Container startup log is captured to `.pi/devcontainer-up.log` (truncated on each new start attempt).
+Exec probe timeout is 10 seconds (increased from 2s to handle slow first-exec after container start).
 
 **`/devcontainer off` flow:**
 1. Set `state.devcontainer.enabled = false`, save

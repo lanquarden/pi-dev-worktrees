@@ -6,18 +6,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-// Mock devcontainer module so probeContainer / tailContainerLog are controllable
+// Mock devcontainer module so probeContainer / tailContainerLog / readStartupOutcome are controllable
 vi.mock("./devcontainer.js", () => ({
   probeContainer: vi.fn(),
   tailContainerLog: vi.fn(),
+  readStartupOutcome: vi.fn(),
 }));
 
-import { probeContainer, tailContainerLog } from "./devcontainer.js";
+import { probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
 import { applyBashIntercept } from "./bash-intercept.js";
 import type { WorktreesState } from "./session.js";
 
 const probe = probeContainer as ReturnType<typeof vi.fn>;
 const tail = tailContainerLog as ReturnType<typeof vi.fn>;
+const startupOutcome = readStartupOutcome as ReturnType<typeof vi.fn>;
 
 const ROOT = "/project";
 
@@ -88,7 +90,10 @@ describe("Rule 2 — git/gh/hub pass through unchanged", () => {
 // ── Rule 3: devcontainer starting ────────────────────────────────────────────
 
 describe("Rule 3 — devcontainer enabled and starting", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    startupOutcome.mockReturnValue({ outcome: null }); // default: still in progress
+  });
 
   const startingState = (startedAt?: number): WorktreesState => ({
     devcontainer: { enabled: true, workspace: ROOT, starting: true, startedAt },
@@ -143,12 +148,35 @@ describe("Rule 3 — devcontainer enabled and starting", () => {
     const result = await intercept("npm test", startingState(Date.now()));
     expect(result).toContain("/devcontainer logs");
   });
+
+  it("shows 'startup failed' message when outcome=error", async () => {
+    tail.mockReturnValue("Error: image not found");
+    startupOutcome.mockReturnValue({
+      outcome: "error",
+      message: "Dev container config is missing image property.",
+    });
+    const result = await intercept("npm test", startingState(Date.now()));
+    expect(result).toContain("startup failed");
+    expect(result).toContain("missing image property");
+    expect(result).toContain("/devcontainer off");
+  });
+
+  it("shows 'started but not accepting exec' when outcome=success but exec not yet ready", async () => {
+    tail.mockReturnValue("outcome:success line");
+    startupOutcome.mockReturnValue({ outcome: "success" });
+    const result = await intercept("npm test", startingState(Date.now() - 5_000));
+    expect(result).toContain("started but not yet accepting exec");
+    expect(result).toContain("retry automatically");
+  });
 });
 
 // ── Rule 4: devcontainer running — probe and wrap ─────────────────────────────
 
 describe("Rule 4 — devcontainer enabled, not starting", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    startupOutcome.mockReturnValue({ outcome: null });
+  });
 
   const runningState: WorktreesState = {
     devcontainer: { enabled: true, workspace: ROOT, starting: false, startedAt: Date.now() - 60_000 },

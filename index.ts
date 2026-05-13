@@ -27,6 +27,7 @@ import {
   startContainer,
   tailContainerLog,
   containerLogPath,
+  readStartupOutcome,
 } from "./devcontainer.js";
 import {
   emitWorkspaceCreated,
@@ -340,14 +341,44 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash" || !projectRoot) return;
 
     if (state.devcontainer?.enabled && state.devcontainer.starting) {
-      const alive = probeContainer(projectRoot);
-      if (alive) {
+      // Fast-path: check if the startup log already says success or error
+      // before doing the slower exec probe.
+      const { outcome, message: outcomeMsg } = readStartupOutcome(projectRoot);
+      if (outcome === "error") {
+        // Container failed to start — turn off targeting so commands run on host
         state.devcontainer.starting = false;
+        state.devcontainer.enabled = false;
         saveState(pi, state);
-        emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
         emitStateUpdate(pi, state);
         ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-        ctx.ui.notify("Devcontainer is ready", "info");
+        const reason = outcomeMsg ? `\n${outcomeMsg}` : "";
+        ctx.ui.notify(
+          `Devcontainer startup failed — targeting disabled. Run /devcontainer logs for details.${reason}`,
+          "warning",
+        );
+      } else if (outcome === "success") {
+        // Container is up — verify exec works then mark ready
+        const alive = probeContainer(projectRoot);
+        if (alive) {
+          state.devcontainer.starting = false;
+          saveState(pi, state);
+          emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
+          emitStateUpdate(pi, state);
+          ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+          ctx.ui.notify("Devcontainer is ready", "info");
+        }
+        // else: log says success but exec still not responding — keep starting=true
+      } else {
+        // No outcome yet — do a direct exec probe as before
+        const alive = probeContainer(projectRoot);
+        if (alive) {
+          state.devcontainer.starting = false;
+          saveState(pi, state);
+          emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
+          emitStateUpdate(pi, state);
+          ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+          ctx.ui.notify("Devcontainer is ready", "info");
+        }
       }
     }
 

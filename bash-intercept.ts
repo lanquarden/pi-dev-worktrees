@@ -11,7 +11,7 @@
  */
 
 import { join } from "node:path";
-import { probeContainer, tailContainerLog } from "./devcontainer.js";
+import { probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
 import type { WorktreesState } from "./session.js";
 
 /** Timeout in ms after which a still-starting container is considered stuck. */
@@ -37,6 +37,28 @@ function containerNotReadyMessage(
   const logSection = logTail
     ? `\n\nStartup log (.pi/devcontainer-up.log):\n${logTail}`
     : "\n\nNo startup log found. The devcontainer CLI may have failed silently.";
+
+  // Check if the startup process has already completed (success or error)
+  const { outcome, message: outcomeMsg } = readStartupOutcome(projectRoot);
+
+  if (outcome === "error") {
+    const reason = outcomeMsg ? `\nError: ${outcomeMsg}` : "";
+    return (
+      `Container startup failed.${reason}` +
+      `\nRun /devcontainer off then /devcontainer on to retry.` +
+      logSection
+    );
+  }
+
+  if (outcome === "success") {
+    // Container up but exec probe hasn't responded yet
+    return (
+      `Container started but not yet accepting exec commands (${elapsedStr}).` +
+      `\nThe extension will retry automatically on the next bash command.` +
+      `\nIf this persists, run /devcontainer off + on to reset.` +
+      logSection
+    );
+  }
 
   if (isStuck) {
     return (

@@ -13,6 +13,7 @@ import {
   tailContainerLog,
   containerLogPath,
   stripJsonComments,
+  readStartupOutcome,
 } from "./devcontainer.js";
 
 function makeTempDir(): string {
@@ -270,5 +271,59 @@ describe("containerLogPath", () => {
     expect(containerLogPath("/my/project")).toBe(
       "/my/project/.pi/devcontainer-up.log",
     );
+  });
+});
+
+// ── readStartupOutcome ────────────────────────────────────────────────────────
+
+describe("readStartupOutcome", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTempDir();
+    mkdirSync(join(dir, ".pi"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("returns null when no log file exists", () => {
+    expect(readStartupOutcome(dir).outcome).toBeNull();
+  });
+
+  it("detects success outcome from final JSON line", () => {
+    const log =
+      "--- devcontainer up started at 2026-01-01T00:00:00Z ---\n" +
+      "[2026-01-01T00:00:01Z] @devcontainers/cli 0.80.2\n" +
+      '{"outcome":"success","containerId":"abc123","remoteUser":"vscode","remoteWorkspaceFolder":"/project"}\n';
+    writeFileSync(containerLogPath(dir), log);
+    expect(readStartupOutcome(dir).outcome).toBe("success");
+  });
+
+  it("detects error outcome and extracts message", () => {
+    const msg = "Dev container config is missing one of \"image\", \"dockerFile\" or \"dockerComposeFile\" properties.";
+    const log =
+      "--- devcontainer up started at 2026-01-01T00:00:00Z ---\n" +
+      `{"outcome":"error","message":${JSON.stringify(msg)},"description":${JSON.stringify(msg)}}\n`;
+    writeFileSync(containerLogPath(dir), log);
+    const result = readStartupOutcome(dir);
+    expect(result.outcome).toBe("error");
+    expect(result.message).toContain("missing one of");
+  });
+
+  it("returns null when log is still being written (no JSON line yet)", () => {
+    const log =
+      "--- devcontainer up started at 2026-01-01T00:00:00Z ---\n" +
+      "[2026-01-01T00:00:01Z] @devcontainers/cli 0.80.2\n" +
+      "[2026-01-01T00:00:02Z] Starting container...\n";
+    writeFileSync(containerLogPath(dir), log);
+    expect(readStartupOutcome(dir).outcome).toBeNull();
+  });
+
+  it("finds JSON line even when followed by trailing text", () => {
+    // Some devcontainer versions print extra lines after the JSON
+    const log =
+      '{"outcome":"success","containerId":"abc"}\n' +
+      "Some extra output\n";
+    writeFileSync(containerLogPath(dir), log);
+    // Scans from end — "Some extra output" is not JSON, so finds the success line
+    expect(readStartupOutcome(dir).outcome).toBe("success");
   });
 });
