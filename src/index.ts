@@ -19,7 +19,7 @@ import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
 import type { BashRouting } from "./bash-intercept.js";
-import { registerDashboardUi } from "./dashboard-ui.js";
+import { registerDashboardUi, setDashboardProjectRoot, invalidateDashboardUi } from "./dashboard-ui.js";
 import { ensureWtpYml, createOrTargetWorktree } from "./worktrees.js";
 import {
   findDevcontainerConfig,
@@ -317,6 +317,13 @@ function workspacesSnapshot(): string {
 
 export default function (pi: ExtensionAPI) {
 
+  // Register dashboard UI listeners at init time, NOT inside session_start.
+  // The bridge's session_start handler calls refreshUiModules (which emits
+  // ui:list-modules) BEFORE pi-worktrees' session_start runs. Registering
+  // here ensures the ui:list-modules listener is in place before the bridge
+  // fires it. projectRoot is set separately via setDashboardProjectRoot().
+  registerDashboardUi(pi);
+
   // ── session_start ──────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     projectRoot = resolveProjectRoot();
@@ -331,7 +338,11 @@ export default function (pi: ExtensionAPI) {
     } catch { /* non-fatal */ }
 
     ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
-    registerDashboardUi(pi, projectRoot);
+    setDashboardProjectRoot(projectRoot);
+    // Trigger a fresh probe now that projectRoot is known and state is
+    // restored. This ensures the footer-segment and modal reflect the
+    // correct initial state (e.g. a restored worktree/devcontainer).
+    invalidateDashboardUi(pi);
   });
 
   // ── before_agent_start ─────────────────────

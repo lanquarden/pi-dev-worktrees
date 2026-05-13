@@ -160,11 +160,21 @@ export function invalidateDashboardUi(pi: ExtensionAPI): void {
 }
 
 /**
- * Register the `ui:list-modules` listener and the data/action event handlers.
- * Call once from the extension entry point.
+ * Update the project root after session_start resolves it.
+ * Call from session_start once projectRoot is known.
  */
-export function registerDashboardUi(pi: ExtensionAPI, projectRoot: string): void {
+export function setDashboardProjectRoot(projectRoot: string): void {
   _projectRoot = projectRoot;
+}
+
+/**
+ * Register the `ui:list-modules` listener and the data/action event handlers.
+ * Must be called at extension init time (not inside session_start) so the
+ * `ui:list-modules` listener is registered before the bridge's session_start
+ * handler fires `refreshUiModules`. The `_projectRoot` variable is set
+ * separately via `setDashboardProjectRoot` once session_start resolves it.
+ */
+export function registerDashboardUi(pi: ExtensionAPI): void {
 
   // ── ui:list-modules probe ──────────────────────────────────────────────
   pi.events.on("ui:list-modules", (probe: { modules: unknown[] }) => {
