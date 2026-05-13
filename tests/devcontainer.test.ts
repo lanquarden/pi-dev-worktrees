@@ -14,7 +14,7 @@ import {
   containerLogPath,
   stripJsonComments,
   readStartupOutcome,
-} from "./devcontainer.js";
+} from "../src/devcontainer.js";
 
 function makeTempDir(): string {
   const dir = join(
@@ -332,7 +332,7 @@ describe("readStartupOutcome", () => {
 
 // ── clearStartupLog ───────────────────────────────────────────────────────────
 
-import { clearStartupLog } from "./devcontainer.js";
+import { clearStartupLog } from "../src/devcontainer.js";
 
 describe("clearStartupLog", () => {
   let dir: string;

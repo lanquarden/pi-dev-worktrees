@@ -7,15 +7,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 // Mock devcontainer module so probeContainer / tailContainerLog / readStartupOutcome are controllable
-vi.mock("./devcontainer.js", () => ({
+vi.mock("../src/devcontainer.js", () => ({
   probeContainer: vi.fn(),
   tailContainerLog: vi.fn(),
   readStartupOutcome: vi.fn(),
 }));
 
-import { probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
-import { applyBashIntercept } from "./bash-intercept.js";
-import type { WorktreesState } from "./session.js";
+import { probeContainer, tailContainerLog, readStartupOutcome } from "../src/devcontainer.js";
+import { applyBashIntercept } from "../src/bash-intercept.js";
+import type { WorktreesState } from "../src/session.js";
 
 const probe = probeContainer as ReturnType<typeof vi.fn>;
 const tail = tailContainerLog as ReturnType<typeof vi.fn>;
@@ -316,7 +316,7 @@ describe("shellQuote — single-quote wrapping with internal quote escaping", ()
 
 // ── cdSafe helper ─────────────────────────────────────────────────────────────
 
-import { cdSafe, shellQuote } from "./bash-intercept.js";
+import { cdSafe, shellQuote } from "../src/bash-intercept.js";
 
 describe("cdSafe — guarded cd with clear failure message", () => {
   it("includes the target path in the failure message", () => {

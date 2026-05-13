@@ -1,0 +1,7 @@
+{
+  "name": "pi-worktrees",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "postCreateCommand": "npm install"
+}
