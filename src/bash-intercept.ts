@@ -132,20 +132,20 @@ export async function applyBashIntercept(
   if (dc?.enabled && !dc.starting) {
     // Check the startup log first before attempting a slow exec probe.
     // If devcontainer up reported success, trust it and wrap immediately.
-    const { outcome } = readStartupOutcome(projectRoot);
+    const { outcome, containerId, remoteWorkspaceFolder: logRemoteWorkspace } = readStartupOutcome(projectRoot);
     const alive = outcome === "success" || probeContainer(projectRoot);
     if (!alive) {
       const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
       return `printf '%s\n' ${shellQuote(msg)} && exit 1`;
     }
 
-    const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
-    // --workspace-folder must be the host path (devcontainer CLI requirement).
-    // The inner working directory uses the container-side path
-    // (remoteWorkspaceFolder from the startup log), which may differ from the
-    // host path when the devcontainer uses a non-transparent mount.
     const hostWorkspace = dc.workspace;
-    const containerWorkspace = dc.remoteWorkspaceFolder ?? hostWorkspace;
+    // Prefer remoteWorkspaceFolder from state (set by tool_call handler after
+    // startup). Fall back to the value in the startup log — this covers the
+    // race where the first bash command fires before the tool_call handler has
+    // saved updated state (e.g. session restored from disk, or first command
+    // immediately after container-ready notification).
+    const containerWorkspace = dc.remoteWorkspaceFolder ?? logRemoteWorkspace ?? hostWorkspace;
 
     // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
@@ -167,6 +167,22 @@ export async function applyBashIntercept(
 
     // Escape inner for sh -c '...'
     const innerEscaped = inner.replace(/'/g, "'\\''");
+
+    // Prefer --container-id when available — it requires no --workspace-folder
+    // or --override-config repetition (all context is baked into the running
+    // container), and avoids OCI chdir failures caused by a mismatch between
+    // the override's workspaceFolder and the actual mount in the container
+    // (e.g. when a pre-existing container started with a different config is
+    // reused by devcontainer up).
+    if (containerId) {
+      return (
+        `devcontainer exec` +
+        ` --container-id ${shellQuote(containerId)}` +
+        ` -- sh -c '${innerEscaped}'`
+      );
+    }
+
+    const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
     return (
       `devcontainer exec` +
       ` --workspace-folder ${shellQuote(hostWorkspace)}` +

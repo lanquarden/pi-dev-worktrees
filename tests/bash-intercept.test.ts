@@ -393,4 +393,99 @@ describe("Rule 4 — container, no worktree — always cds to containerWorkspace
     expect(result).toContain(`/project`);
     expect(result).toContain("pwd");
   });
+
+  it("reads remoteWorkspaceFolder from startup log when absent in state (race fix)", async () => {
+    // Reproduces the session bug: state has no remoteWorkspaceFolder yet
+    // (tool_call handler hasn't saved it) but the log has it.
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "abc123",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      // remoteWorkspaceFolder intentionally absent — simulates the race
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("uv lock --check", state);
+    // Must use container-side path, not host path
+    expect(result).toContain("/workspaces/myrepo");
+    expect(result).not.toContain("cd '/project'");
+    expect(result).toContain("uv lock --check");
+  });
+});
+
+// ── Rule 4: --container-id vs --workspace-folder ─────────────────────────────────────────
+
+describe("Rule 4 — exec routing: --container-id vs --workspace-folder", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tail.mockReturnValue("");
+  });
+
+  it("uses --container-id when log has containerId (no --workspace-folder)", async () => {
+    // Reproduces the session bug: container started with old config, reused
+    // by devcontainer up; workspace-folder path doesn't exist in container.
+    // Fix: use --container-id so no cwd/workspace-folder configuration is needed.
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "abc123def456",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("npm test", state);
+    expect(result).toContain("--container-id");
+    expect(result).toContain("abc123def456");
+    expect(result).not.toContain("--workspace-folder");
+    expect(result).not.toContain("--override-config");
+  });
+
+  it("falls back to --workspace-folder when log has no containerId", async () => {
+    startupOutcome.mockReturnValue({ outcome: null });
+    probe.mockReturnValue(true);
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const result = await intercept("npm test", state);
+    expect(result).toContain("--workspace-folder");
+    expect(result).toContain("--override-config");
+    expect(result).not.toContain("--container-id");
+  });
+
+  it("uses container-side path for cd when containerId present (no OCI chdir failure)", async () => {
+    // This is the specific failure from the session: container mounted at
+    // /workspaces/myrepo but exec tried to cd to /project (host path).
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "deadbeef1234",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+      // No remoteWorkspaceFolder in state \u2014 simulates the race
+    };
+    const result = await intercept("uv lock --check", state);
+    // Container-side cd, not host path (path appears shell-quoted in the result)
+    expect(result).toContain("/workspaces/myrepo");
+    expect(result).not.toContain("/project");
+  });
+
+  it("worktree path mapped to container-side prefix when using --container-id", async () => {
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "deadbeef1234",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+      worktree: { branch: "fix-agent-session", path: "/project/.pi/worktrees/fix-agent-session" },
+    };
+    const result = await intercept("uv lock --check", state);
+    expect(result).toContain("--container-id");
+    // Worktree path: /project/.pi/worktrees/fix-agent-session
+    // Mapped:        /workspaces/myrepo/.pi/worktrees/fix-agent-session
+    expect(result).toContain("/workspaces/myrepo/.pi/worktrees/fix-agent-session");
+    expect(result).not.toContain("/project/");
+  });
 });
