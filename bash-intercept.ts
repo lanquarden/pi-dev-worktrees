@@ -111,7 +111,10 @@ export async function applyBashIntercept(
 
   // Rule 4: devcontainer enabled and not starting — probe and wrap
   if (dc?.enabled && !dc.starting) {
-    const alive = probeContainer(projectRoot);
+    // Check the startup log first before attempting a slow exec probe.
+    // If devcontainer up reported success, trust it and wrap immediately.
+    const { outcome } = readStartupOutcome(projectRoot);
+    const alive = outcome === "success" || probeContainer(projectRoot);
     if (!alive) {
       const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
       return `printf '%s\n' ${shellQuote(msg)} && exit 1`;

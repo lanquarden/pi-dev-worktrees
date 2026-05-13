@@ -65,6 +65,7 @@ describe("Rule 2 — git/gh/hub pass through unchanged", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     probe.mockReturnValue(true);
+    startupOutcome.mockReturnValue({ outcome: null });
   });
 
   it("passes git commands through", async () => {
@@ -182,9 +183,19 @@ describe("Rule 4 — devcontainer enabled, not starting", () => {
     devcontainer: { enabled: true, workspace: ROOT, starting: false, startedAt: Date.now() - 60_000 },
   };
 
-  it("probes container before wrapping", async () => {
+  it("skips exec probe and wraps command when startup log says success", async () => {
+    probe.mockReturnValue(false); // probe would fail
+    startupOutcome.mockReturnValue({ outcome: "success" });
+    const result = await intercept("npm test", runningState);
+    expect(result).toContain("devcontainer exec");
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("falls back to exec probe when no startup outcome in log", async () => {
     probe.mockReturnValue(true);
-    await intercept("npm test", runningState);
+    startupOutcome.mockReturnValue({ outcome: null });
+    const result = await intercept("npm test", runningState);
+    expect(result).toContain("devcontainer exec");
     expect(probe).toHaveBeenCalledOnce();
   });
 
