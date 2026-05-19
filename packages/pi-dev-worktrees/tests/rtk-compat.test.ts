@@ -131,6 +131,19 @@ describe("detectRtkConflicts", () => {
 
       expect(notify).not.toHaveBeenCalled();
     });
+
+    it("does NOT emit generic warning when bash path is <builtin:bash>", () => {
+      // Actual path observed at runtime when the built-in bash tool is active.
+      // source is not "built-in" in this case, so the path must be checked.
+      const tools = [
+        makeToolInfo("bash", "<builtin:bash>", "local"),
+      ];
+      const { pi, ctx, notify } = makeMocks(tools, []);
+
+      detectRtkConflicts(pi, ctx);
+
+      expect(notify).not.toHaveBeenCalled();
+    });
   });
 
   describe("Scenario: pi-rtk-optimizer detected, load order unverified", () => {
