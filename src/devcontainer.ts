@@ -240,6 +240,7 @@ export function buildStartArgs(
   projectRoot: string,
   overridePath: string,
   removeExisting: boolean,
+  noCache = false,
 ): string[] {
   const args = [
     "up",
@@ -249,6 +250,7 @@ export function buildStartArgs(
     overridePath,
   ];
   if (removeExisting) args.push("--remove-existing-container");
+  if (noCache) args.push("--no-cache");
   return args;
 }
 
@@ -261,7 +263,7 @@ export function buildStartArgs(
  *   Use this when you need a clean start, e.g. after config changes or when
  *   a stale container from a previous session is suspected.
  */
-export function startContainer(projectRoot: string, removeExisting = false): void {
+export function startContainer(projectRoot: string, removeExisting = false, noCache = false): void {
   const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
   const logPath = containerLogPath(projectRoot);
 
@@ -271,7 +273,7 @@ export function startContainer(projectRoot: string, removeExisting = false): voi
   const logFd = openSync(logPath, "a");
   const child = spawn(
     "devcontainer",
-    buildStartArgs(projectRoot, overridePath, removeExisting),
+    buildStartArgs(projectRoot, overridePath, removeExisting, noCache),
     {
       detached: true,
       stdio: ["ignore", logFd, logFd],
