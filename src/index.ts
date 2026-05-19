@@ -228,6 +228,41 @@ function devcontainerOff(pi: ExtensionAPI): ActionResult {
   return { ok: true, message: `Devcontainer targeting off.${stopNote}` };
 }
 
+function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
+  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+
+  try {
+    execSync("devcontainer --version", { stdio: "ignore", timeout: 5000 });
+  } catch {
+    return { ok: false, message: "devcontainer CLI not found. Install it to use container features." };
+  }
+
+  const configPath = findDevcontainerConfig(projectRoot);
+  if (!configPath)
+    return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
+
+  try {
+    generateOverrideJson(projectRoot, configPath, /* force */ true);
+  } catch (err) {
+    return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
+  }
+
+  stopContainer(projectRoot);
+  clearStartupLog(projectRoot);
+
+  try {
+    startContainer(projectRoot, /* removeExisting */ true, /* noCache */ true);
+  } catch (err) {
+    return { ok: false, message: `Failed to start container: ${String(err)}` };
+  }
+
+  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now() };
+  saveState(pi, state);
+  emitDevcontainerStarting(pi, projectRoot, projectRoot);
+  emitStateUpdate(pi, state);
+  return { ok: true, message: "Devcontainer rebuild started — full image rebuild in progress (this takes longer than a normal start)" };
+}
+
 function devcontainerOn(pi: ExtensionAPI): ActionResult {
   if (!projectRoot) return { ok: false, message: "Not in a git repository" };
 
@@ -712,7 +747,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("devcontainer", {
-    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | logs]",
+    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | rebuild | logs]",
     handler: async (args, ctx) => {
       const arg = args?.trim();
       if (!arg) {
@@ -722,6 +757,12 @@ export default function (pi: ExtensionAPI) {
       }
       if (arg === "off") {
         const r = devcontainerOff(pi);
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+        ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+        return;
+      }
+      if (arg === "rebuild") {
+        const r = devcontainerRebuild(pi);
         ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
@@ -742,7 +783,7 @@ export default function (pi: ExtensionAPI) {
         }
         return;
       }
-      ctx.ui.notify("Usage: /devcontainer [on | off | logs]", "info");
+      ctx.ui.notify("Usage: /devcontainer [on | off | rebuild | logs]", "info");
     },
   });
 
