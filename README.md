@@ -78,7 +78,6 @@ Or, if the container does not have the host `rtk` on its path at build time, ins
 ## Incompatible extensions
 
 - **`@sherif-fanous/pi-rtk`** — uses a `spawnHook`-based bash tool replacement. `spawnHook` fires *after* all `tool_call` handlers, so it receives the fully-wrapped `devcontainer exec ... -- sh -c '...'` string instead of the inner command. This breaks container routing silently. Do not load alongside `pi-dev-worktrees`.
-- **`mcowger/pi-rtk`** — stale (no active maintenance), superseded by `pi-rtk-optimizer`. Uses only `tool_result` (no conflict), but not recommended for new setups.
 
 ## Installation
 
