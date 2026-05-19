@@ -1,1 +1,13 @@
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+
+# npm pack tarballs
+*.tgz
+
+# Environment files
+.env
+.env.*
+!.env.example
