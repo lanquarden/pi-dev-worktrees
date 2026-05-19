@@ -1,6 +1,6 @@
 ## Context
 
-`pi-worktrees` currently emits `pi.events` for all state changes (workspace created/switched,
+`pi-dev-worktrees` currently emits `pi.events` for all state changes (workspace created/switched,
 devcontainer starting/ready/stopped) — these are forwarded to the dashboard as `event_forward`
 messages. However, the dashboard's session card UI has no visual representation of workspace
 state. The extension status bar update (`ctx.ui.setStatus`) only shows inside the pi TUI.
@@ -15,7 +15,7 @@ The bridge discovers both by emitting `ui:list-modules` on `session_start` and e
 `ui:invalidate`. The extension registers a synchronous listener; no async, no new protocol.
 
 **Current codebase state:** `dashboard-events.ts` has `emitStateUpdate(pi, state)` which
-calls `pi.events.emit("pi-worktrees:state", state)`. All command/tool handlers call this
+calls `pi.events.emit("pi-dev-worktrees:state", state)`. All command/tool handlers call this
 after any mutation. The state object (`WorktreesState`) lives in `session.ts`.
 
 ## Goals / Non-Goals
@@ -45,10 +45,10 @@ call inside `emitStateUpdate`.
 **Alternative**: inline everything in `index.ts`. Rejected — `index.ts` is already 300 lines;
 separating UI concerns keeps it reviewable and testable independently.
 
-### D2 — `footer-segment` namespace `"pi-worktrees"`, id `"workspace-state"`
+### D2 — `footer-segment` namespace `"pi-dev-worktrees"`, id `"workspace-state"`
 
-Namespace must match `/^[a-z0-9-]+$/`; `"pi-worktrees"` satisfies this. Using a stable id
-means every probe produces a single cache entry at key `footer-segment:pi-worktrees:workspace-state`.
+Namespace must match `/^[a-z0-9-]+$/`; `"pi-dev-worktrees"` satisfies this. Using a stable id
+means every probe produces a single cache entry at key `footer-segment:pi-dev-worktrees:workspace-state`.
 When both worktree and devcontainer are off, push `removed: true` to clear the decorator
 from the card rather than showing empty text.
 

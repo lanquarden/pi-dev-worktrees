@@ -2,7 +2,7 @@
 
 ### Requirement: Footer segment registered on ui:list-modules
 When the pi-agent-dashboard bridge emits `ui:list-modules`, the extension SHALL push a
-`footer-segment` descriptor (namespace `"pi-worktrees"`, id `"workspace-state"`) into
+`footer-segment` descriptor (namespace `"pi-dev-worktrees"`, id `"workspace-state"`) into
 `probe.modules` if the session has an active worktree or devcontainer. If neither is active,
 the extension SHALL push the same descriptor with `removed: true` to clear any previously
 displayed segment.

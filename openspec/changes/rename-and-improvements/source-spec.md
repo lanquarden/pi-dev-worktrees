@@ -1,7 +1,7 @@
-# Exploration: `pi-worktrees` — learnings from peer plugins & rename proposal
+# Exploration: `pi-dev-worktrees` — learnings from peer plugins & rename proposal
 
 **Date:** 2026-05-19  
-**Status:** Exploration (pre-spec)  
+**Status:** Partially completed (rename ✅, Gap A ✅ via `wtp-hook-management`; Gaps B, C, F, G, H pending)  
 **Scope:** Comparison of `zenobi-us/pi-worktrees`, `rielj/pi-git-worktrees`, and the local plugin; rename to `pi-dev-worktrees`.
 
 ---
@@ -12,7 +12,7 @@
 |--------|-------|
 | `zenobi-us/pi-worktrees` (`@zenobius/pi-worktrees`) | CLI-first worktree management with rich config, pattern-matching per repo, optional branch-name generator, post-create hooks (onCreate), and animated progress during hook execution |
 | `rielj/pi-git-worktrees` | Parallel-agent orchestration via tmux, LLM tools (`wt_new`, `wt_send`, `wt_wait`, `wt_gather`), heartbeat monitoring, interactive `/worktrees` panel with keyboard nav |
-| Local `pi-worktrees` (this repo) | Worktree-per-branch via `wtp`, devcontainer targeting with bash-intercept routing, dashboard visual feedback (`footer-segment`, `workspaces-modal`) |
+| Local `pi-dev-worktrees` (this repo) | Worktree-per-branch via `wtp`, devcontainer targeting with bash-intercept routing, dashboard visual feedback (`footer-segment`, `workspaces-modal`) |
 
 ---
 
@@ -35,18 +35,18 @@ Using `wtp` rather than raw `git worktree add` gives:
 - Enforces placement under `.pi/worktrees/` (gitignored) so worktrees never accidentally land in the project tree root.
 
 ### 2.3 Dashboard integration
-`zenobi-us` and `rielj` have no pi-agent-dashboard integration. This plugin emits `pi-worktrees:state` and structured `ui:list-modules` modules (`footer-segment` + `management-modal`).
+`zenobi-us` and `rielj` have no pi-agent-dashboard integration. This plugin emits `pi-dev-worktrees:state` and structured `ui:list-modules` modules (`footer-segment` + `management-modal`).
 
 ---
 
 ## 3. Gaps identified by studying the peers
 
-### Gap A — No `onCreate` hooks (from `zenobi-us`)
+### Gap A — No `onCreate` hooks (from `zenobi-us`) ✅ Done
 `@zenobius/pi-worktrees` runs an `onCreate` command array after worktree creation, with live animated output in the TUI. This is valuable for:
 - Running `mise install`, `npm install`, etc. in the new worktree automatically.
 - The current plugin only generates `.wtp.yml` with two shell hooks (copy secrets, direnv allow) but those run inside `wtp` silently; there is no way for the LLM or user to see what happened.
 
-**Proposal:** Add a post-create hook runner inside `createOrTargetWorktree` (or inside `worktrees.ts`) that runs a configurable command array and streams output back to `ctx.ui.notify`.
+**Implemented:** `wtp add` output is now surfaced via a second `ctx.ui.notify` after worktree creation. `/worktree hooks` commands allow managing `.wtp.yml` hooks from within pi. See `openspec/changes/wtp-hook-management/`.
 
 ### Gap B — No per-repo config (from `zenobi-us`)
 `@zenobius/pi-worktrees` stores settings in `~/.pi/agent/pi-worktrees.config.json` keyed by repo URL glob patterns (e.g. `"github.com/org/*"`). Each entry can have a different `worktreeRoot`, `onCreate`, and `branchNameGenerator`.
@@ -111,26 +111,26 @@ Some projects have multiple devcontainer configurations (e.g. `.devcontainer/bas
 
 ## 5. Priority ranking for improvements
 
-| # | Gap | Effort | Value |
-|---|-----|--------|-------|
-| 1 | **Rename** to `pi-dev-worktrees` | Low | High (brand clarity) |
-| 2 | **`/devcontainer rebuild`** (Gap G) | Low | High (common workflow) |
-| 3 | **`/worktree prune`** + prune after cleanup (Gap F) | Low | Medium |
-| 4 | **`onCreate` hooks** (Gap A) | Medium | High (automation) |
-| 5 | **Multi-devcontainer config selection** (Gap H) | Medium | Medium |
-| 6 | **Per-repo config** (Gap B) | Medium | Medium (multi-repo users) |
-| 7 | **Branch-name generator** (Gap C) | Low | Low (nice to have) |
-| 8 | **Parallel agent orchestration** (Gap D) | High | Out of scope |
+| # | Gap | Effort | Value | Status |
+|---|-----|--------|-------|--------|
+| 1 | **Rename** to `pi-dev-worktrees` | Low | High (brand clarity) | ✅ Done |
+| 2 | **`onCreate` hooks** (Gap A) | Medium | High (automation) | ✅ Done (`wtp-hook-management`) |
+| 3 | **`/devcontainer rebuild`** (Gap G) | Low | High (common workflow) | ✅ Specced (`devcontainer-rebuild`) |
+| 4 | **`/worktree prune`** + prune after cleanup (Gap F) | Low | Medium | ✅ Specced (`worktree-prune`) |
+| 5 | **Multi-devcontainer config selection** (Gap H) | Medium | Medium | Pending |
+| 6 | **Per-repo config** (Gap B) | Medium | Medium (multi-repo users) | ✅ Specced (`per-repo-config`) |
+| 7 | **Branch-name generator** (Gap C) | Low | Low (nice to have) | Pending |
+| 8 | **Parallel agent orchestration** (Gap D) | High | Out of scope | Out of scope |
 
 ---
 
 ## 6. Conclusion
 
-The local `pi-worktrees` plugin has a unique, un-replicated devcontainer integration that justifies standing alone and warrants the rename to `pi-dev-worktrees`. The most actionable improvements from studying the peers are:
+The `pi-dev-worktrees` plugin has a unique, un-replicated devcontainer integration that justifies standing alone. The rename and `onCreate` hook surfacing (Gap A) are complete. The remaining high-value items are:
 
-1. **Rename** (branding, avoids package name collision).
-2. **`/devcontainer rebuild`** command — fills a common workflow gap with minimal code.
-3. **`/worktree prune`** — trivial addition (`git worktree prune`), pairs well with existing `/workspace-cleanup`.
-4. **`onCreate` post-create hooks** — brings the biggest workflow win, inspired by `@zenobius/pi-worktrees`.
+1. **`/devcontainer rebuild`** (Gap G) — fills a common workflow gap with minimal code.
+2. **`/worktree prune`** (Gap F) — trivial addition (`git worktree prune`), pairs well with existing `/workspace-cleanup`.
+3. **Multi-devcontainer config selection** (Gap H) — useful for projects with multiple devcontainer configs.
+4. **Per-repo config** (Gap B) — needed when working across multiple repos from a global pi install.
 
 The parallel-agent orchestration model from `rielj/pi-git-worktrees` is a different product class (tmux-based multi-session) and should be treated as a complementary extension rather than something to absorb.

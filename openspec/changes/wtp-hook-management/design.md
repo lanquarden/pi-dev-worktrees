@@ -1,6 +1,6 @@
 ## Context
 
-`pi-worktrees` delegates worktree creation to `wtp add`, which already executes `post_create`
+`pi-dev-worktrees` delegates worktree creation to `wtp add`, which already executes `post_create`
 hooks and streams rich progress output to the terminal. The plugin currently calls `wtp add`
 via `execSync` — a mode that captures stdout/stderr into a string, discards it on success,
 and only surfaces a generic error message on failure. Hook output is permanently lost.

@@ -1,21 +1,21 @@
-# Spec: `pi-worktrees` — Pi Extension
+# Spec: `pi-dev-worktrees` — Pi Extension
 
 **Status:** Draft  
 **Date:** 2026-05-12  
-**Location:** `.pi/extensions/pi-worktrees/` (project-local extension)
+**Location:** `.pi/extensions/pi-dev-worktrees/` (project-local extension)
 
 ---
 
 ## 1. Overview
 
-`pi-worktrees` is a pi extension that provides isolated branch workspaces for pi sessions using:
+`pi-dev-worktrees` is a pi extension that provides isolated branch workspaces for pi sessions using:
 
 - **wtp** for git worktrees — lightweight per-branch directory isolation inside the project tree
 - **devcontainer CLI** for container isolation — single container per project (not per branch)
 
 **Key differences from `opencode-devcontainers`:**
 
-| Feature | opencode-devcontainers | pi-worktrees |
+| Feature | opencode-devcontainers | pi-dev-worktrees |
 |---------|----------------------|--------------|
 | Worktree location | `~/.local/share/opencode/worktree/<repo>/<branch>/` | `<project>/.pi/worktrees/<branch>/` |
 | Worktree tooling | raw `git worktree add` | `wtp` (with `.wtp.yml` hooks) |
@@ -41,7 +41,7 @@
 <project>/
 ├── .pi/
 │   ├── extensions/
-│   │   └── pi-worktrees/
+│   │   └── pi-dev-worktrees/
 │   │       ├── index.ts            ← extension entry point (registers all hooks/commands)
 │   │       ├── package.json        ← npm deps declaration
 │   │       ├── worktrees.ts        ← wtp invocation, wtp.yml generation
@@ -95,7 +95,7 @@ If `.wtp.yml` already exists it is left completely untouched.
 State is persisted to the session file (survives restarts and `/resume`) via `pi.appendEntry()`.
 
 ```typescript
-// customType: "pi-worktrees:state"
+// customType: "pi-dev-worktrees:state"
 interface WorktreesState {
   worktree?: {
     branch: string;  // original branch name, e.g. "feature/auth"
@@ -110,7 +110,7 @@ interface WorktreesState {
 }
 ```
 
-**Restore on session_start:** scan `ctx.sessionManager.getEntries()` for all entries with `customType === "pi-worktrees:state"`, take the last one, and re-hydrate the in-memory state.
+**Restore on session_start:** scan `ctx.sessionManager.getEntries()` for all entries with `customType === "pi-dev-worktrees:state"`, take the last one, and re-hydrate the in-memory state.
 
 ---
 
@@ -136,15 +136,15 @@ interface WorktreesState {
      - `git branch --list <branch>` non-empty **or** `git ls-remote --heads origin <branch>` non-empty → `wtp add <branch>`
      - Both empty (new branch) → `wtp add -b <branch>`
 5. Auto-append `.pi/worktrees/` to `.gitignore` if pattern not already present
-6. Save state via `pi.appendEntry("pi-worktrees:state", state)`
+6. Save state via `pi.appendEntry("pi-dev-worktrees:state", state)`
 7. Emit `pi.events`:
-   - First creation → `pi-worktrees:workspace-created`
-   - Re-targeting → `pi-worktrees:workspace-switched`
+   - First creation → `pi-dev-worktrees:workspace-created`
+   - Re-targeting → `pi-dev-worktrees:workspace-switched`
 8. Notify: `"Worktree active: .pi/worktrees/feature/auth/ — bash runs there"`
 
 **Disable (`/worktree off`):**
 1. Clear `state.worktree`, save
-2. Emit `pi-worktrees:workspace-switched { worktree: null, cwd }`
+2. Emit `pi-dev-worktrees:workspace-switched { worktree: null, cwd }`
 3. Notify: `"Worktree mode off — commands run in project root"`
 
 ---
@@ -167,7 +167,7 @@ interface WorktreesState {
    - Success → container already running → save state `{ enabled: true }`, notify, done
 5. Spawn `devcontainer up --workspace-folder <root> --override-config .pi/devcontainer.override.json` detached (background)
 6. Save state `{ enabled: true, starting: true }`
-7. Emit `pi-worktrees:devcontainer-starting { workspace, cwd }`
+7. Emit `pi-dev-worktrees:devcontainer-starting { workspace, cwd }`
 8. Notify: `"Container starting… bash commands will queue until it's ready"`
 
 **Readiness polling (lazy, in bash intercept):** on every intercepted bash command while `starting: true`:
@@ -186,7 +186,7 @@ Exec probe timeout is 10 seconds (increased from 2s to handle slow first-exec af
 2. Clear `.pi/devcontainer-up.log` (truncate to empty) so stale `outcome:success` cannot short-circuit the next `/devcontainer on`
 3. Clear `state.devcontainer.remoteWorkspaceFolder`
 4. Set `state.devcontainer.enabled = false`, save
-5. Emit `pi-worktrees:devcontainer-stopped`
+5. Emit `pi-dev-worktrees:devcontainer-stopped`
 6. Notify with stop result: container ID stopped, or warning if stop failed
 
 ---
@@ -194,7 +194,7 @@ Exec probe timeout is 10 seconds (increased from 2s to handle slow first-exec af
 ### §6a — `.pi/devcontainer.override.json`
 
 Generated on first `/devcontainer on` call (or regenerated if the existing file is the old
-2-field stub from a previous version of pi-worktrees).
+2-field stub from a previous version of pi-dev-worktrees).
 
 Because `--override-config` **replaces** the entire devcontainer config rather than merging
 on top of it, the override must be a complete, valid devcontainer config. The extension
@@ -263,7 +263,7 @@ Interactive removal of stale worktrees.
 5. For each selected:
    - If dirty → `ctx.ui.confirm("Has uncommitted changes. Force remove?")` → skip if declined
    - `wtp remove [--force] <branch>` (original branch name, e.g. `feature/auth`)
-   - Emit `pi-worktrees:workspace-removed { branch, path, cwd }`
+   - Emit `pi-dev-worktrees:workspace-removed { branch, path, cwd }`
 6. Notify summary: `"Removed N worktree(s)"`
 
 ---
@@ -310,7 +310,7 @@ pi.on("before_agent_start", async (_event, ctx) => {
   const state = loadState(ctx);
   if (!state.worktree && !state.devcontainer?.enabled) return;
 
-  const lines = ["## Active Workspace (pi-worktrees)"];
+  const lines = ["## Active Workspace (pi-dev-worktrees)"];
   if (state.worktree) {
     lines.push(`- Branch: \`${state.worktree.branch}\``);
     lines.push(`- Worktree path: \`${state.worktree.path}\``);
@@ -325,7 +325,7 @@ pi.on("before_agent_start", async (_event, ctx) => {
 
   return {
     message: {
-      customType: "pi-worktrees:context",
+      customType: "pi-dev-worktrees:context",
       content: lines.join("\n"),
       display: false,   // injected silently, not shown in chat
     },
@@ -337,19 +337,19 @@ pi.on("before_agent_start", async (_event, ctx) => {
 
 ## 9. Dashboard Integration (`pi.events`)
 
-The extension emits structured events on `pi.events`. The pi-dashboard bridge intercepts **all** `pi.events.emit` calls via a catch-all shim and forwards them as `event_forward` protocol messages, using the channel name directly as `eventType` for unknown channels. `pi-worktrees:*` events are therefore forwarded automatically — no bridge changes are needed.
+The extension emits structured events on `pi.events`. The pi-dashboard bridge intercepts **all** `pi.events.emit` calls via a catch-all shim and forwards them as `event_forward` protocol messages, using the channel name directly as `eventType` for unknown channels. `pi-dev-worktrees:*` events are therefore forwarded automatically — no bridge changes are needed.
 
 ### Event Catalogue
 
 | Event | Payload | When |
 |-------|---------|------|
-| `pi-worktrees:workspace-created` | `{ type: "worktree", branch, path, cwd }` | wtp creates a new worktree |
-| `pi-worktrees:workspace-switched` | `{ type: "worktree", branch, path, cwd }` or `{ worktree: null, cwd }` | session retargets or disables |
-| `pi-worktrees:workspace-removed` | `{ type: "worktree", branch, path, cwd }` | worktree deleted by cleanup |
-| `pi-worktrees:devcontainer-starting` | `{ workspace, cwd }` | `devcontainer up` launched |
-| `pi-worktrees:devcontainer-ready` | `{ workspace, cwd }` | container confirmed running |
-| `pi-worktrees:devcontainer-stopped` | `{ workspace, cwd }` | targeting disabled |
-| `pi-worktrees:state` | `WorktreesState` | any state mutation (full snapshot) |
+| `pi-dev-worktrees:workspace-created` | `{ type: "worktree", branch, path, cwd }` | wtp creates a new worktree |
+| `pi-dev-worktrees:workspace-switched` | `{ type: "worktree", branch, path, cwd }` or `{ worktree: null, cwd }` | session retargets or disables |
+| `pi-dev-worktrees:workspace-removed` | `{ type: "worktree", branch, path, cwd }` | worktree deleted by cleanup |
+| `pi-dev-worktrees:devcontainer-starting` | `{ workspace, cwd }` | `devcontainer up` launched |
+| `pi-dev-worktrees:devcontainer-ready` | `{ workspace, cwd }` | container confirmed running |
+| `pi-dev-worktrees:devcontainer-stopped` | `{ workspace, cwd }` | targeting disabled |
+| `pi-dev-worktrees:state` | `WorktreesState` | any state mutation (full snapshot) |
 
 `cwd` = absolute project root, allowing the dashboard to correlate with its pinned directory list.
 
@@ -367,7 +367,7 @@ The v1 event payload schema is deliberately compatible with this.
 
 ```json
 {
-  "name": "pi-worktrees",
+  "name": "pi-dev-worktrees",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -402,7 +402,7 @@ The v1 event payload schema is deliberately compatible with this.
 
 8. **`devcontainer.override.json` regeneration** — Only generated if absent. The user owns the file after first generation and can customise it freely (e.g. add extra mounts or env vars). The extension documents the initial template so users know what they started from.
 
-9. **`pi.events` forwarding (confirmed)** — The pi-dashboard bridge catches all `pi.events.emit` calls via a catch-all shim and forwards them as `event_forward` messages. Unknown channel names are used directly as `eventType`. `pi-worktrees:*` events are forwarded automatically with no bridge changes required.
+9. **`pi.events` forwarding (confirmed)** — The pi-dashboard bridge catches all `pi.events.emit` calls via a catch-all shim and forwards them as `event_forward` messages. Unknown channel names are used directly as `eventType`. `pi-dev-worktrees:*` events are forwarded automatically with no bridge changes required.
 
 ---
 

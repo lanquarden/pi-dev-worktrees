@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This change adds two capabilities to `pi-worktrees`:
+This change adds two capabilities to `pi-dev-worktrees`:
 
 1. **`wtp add` output surfacing** — the hook progress narrated by `wtp add` is captured and shown to the user instead of being silently discarded.
 2. **`.wtp.yml` hook management** — new subcommands let users view and edit the `post_create` hooks in `.wtp.yml` from within pi, without hand-editing YAML.

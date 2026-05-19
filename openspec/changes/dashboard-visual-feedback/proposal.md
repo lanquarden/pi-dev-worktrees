@@ -1,6 +1,6 @@
 ## Why
 
-The `pi-worktrees` extension manages git worktrees and devcontainers per session, but its
+The `pi-dev-worktrees` extension manages git worktrees and devcontainers per session, but its
 state (active branch, container status) is only visible inside the pi TUI status bar.
 The pi-agent-dashboard session cards show no workspace context, making it hard to tell at
 a glance which worktree or container each session is using. Now that `useRpcKeeper` is
@@ -51,7 +51,7 @@ _(none — no existing spec-level requirements change)_
   listener, the `workspaces:list` and `workspaces:delete-row` event handlers, and exposes
   `invalidateDashboardUi(pi)` for callers.
 - **`dashboard-events.ts`**: `emitStateUpdate()` calls `invalidateDashboardUi(pi)` after
-  the existing `pi.events.emit("pi-worktrees:state", ...)`.
+  the existing `pi.events.emit("pi-dev-worktrees:state", ...)`.
 - No changes to `session.ts`, `worktrees.ts`, `devcontainer.ts`, or `bash-intercept.ts`.
 - No new runtime dependencies; `@blackbelt-technology/pi-dashboard-shared` added as a
   devDependency for types only (already transitively present via the bridge extension).

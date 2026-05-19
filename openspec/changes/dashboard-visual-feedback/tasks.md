@@ -26,7 +26,7 @@
 
 - [x] 3.1 Import `invalidateDashboardUi` from `./dashboard-ui.js`
 - [x] 3.2 In `emitStateUpdate`, call `invalidateDashboardUi(pi)` after the existing
-       `pi.events.emit("pi-worktrees:state", state)` call
+       `pi.events.emit("pi-dev-worktrees:state", state)` call
 
 ## 4. Patch `index.ts`
 
@@ -36,7 +36,7 @@
 
 ## 5. Verification
 
-- [x] 5.1 Start a pi session in `~/hq/repos/pi-worktrees`, open the dashboard, confirm
+- [x] 5.1 Start a pi session in this repo, open the dashboard, confirm
        no footer segment shows on the session card initially
 - [x] 5.2 Run `/worktree feature/test` — confirm the footer segment appears on the card
        showing `⎇ feature/test`
