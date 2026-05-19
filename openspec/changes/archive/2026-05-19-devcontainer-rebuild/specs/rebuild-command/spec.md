@@ -60,3 +60,7 @@ clear the startup log, and start a new container with `--remove-existing-contain
 ### Requirement: `/devcontainer` usage hint SHALL include `rebuild`
 The `/devcontainer` command description and the usage hint shown on unknown args SHALL
 read: `"Usage: /devcontainer [on | off | rebuild | logs]"`.
+
+#### Scenario: unknown argument shows updated hint
+- **WHEN** `/devcontainer unknown-arg` is issued
+- **THEN** `ctx.ui.notify` reports `"Usage: /devcontainer [on | off | rebuild | logs]"`
