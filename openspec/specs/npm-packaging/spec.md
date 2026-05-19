@@ -6,11 +6,7 @@ Both packages in the monorepo SHALL be publishable to npm under the `@lanquarden
 `@lanquarden/pi-dev-worktrees` SHALL be discoverable and auto-installable by the pi
 package system. `@lanquarden/pi-dev-worktrees-dashboard-plugin` SHALL be discoverable
 via the npm registry as a pi-agent-dashboard plugin.
-
----
-
 ## Requirements
-
 ### Requirement: `@lanquarden/pi-dev-worktrees` SHALL declare a `pi` manifest
 `packages/pi-dev-worktrees/package.json` SHALL contain a `"pi"` key with an
 `"extensions"` array listing `"./src/index.ts"` as the extension entry point. This
@@ -76,3 +72,4 @@ Package names SHALL be `@lanquarden/pi-dev-worktrees` and
 #### Scenario: scoped names
 - **THEN** `packages/pi-dev-worktrees/package.json` `"name"` === `"@lanquarden/pi-dev-worktrees"`
 - **THEN** `packages/pi-dev-worktrees-dashboard-plugin/package.json` `"name"` === `"@lanquarden/pi-dev-worktrees-dashboard-plugin"`
+

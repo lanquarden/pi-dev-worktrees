@@ -27,6 +27,13 @@ Restructure both `package.json` files to be proper npm-publishable packages:
 - Add a `pi` manifest key to `@lanquarden/pi-dev-worktrees` pointing at `./src/index.ts` so `pi install` auto-discovers the extension.
 - Add `keywords` to `@lanquarden/pi-dev-worktrees-dashboard-plugin` for registry discoverability (`pi-dashboard-plugin`).
 
+## What Changes
+
+- `packages/pi-dev-worktrees/package.json` — full rewrite with all npm fields + `pi` manifest.
+- `packages/pi-dev-worktrees-dashboard-plugin/package.json` — add `keywords` only; all other fields were already correct.
+- Root `package.json` — left unchanged (`private: true`, workspace root only).
+- `openspec/specs/npm-packaging/spec.md` — new spec documenting the publishability requirements.
+
 ## Scope
 
 - `packages/pi-dev-worktrees/package.json` — full rewrite with all npm fields + `pi` manifest.

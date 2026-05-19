@@ -33,4 +33,4 @@
 
 ## 4. Commit
 
-- [ ] 4.1 Commit with message: `feat: add npm package specs for monorepo structure`
+- [x] 4.1 Commit with message: `feat: add npm package specs for monorepo structure`

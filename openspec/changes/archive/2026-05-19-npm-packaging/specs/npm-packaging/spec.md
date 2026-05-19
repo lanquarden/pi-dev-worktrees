@@ -1,15 +1,4 @@
-# npm-packaging Specification
-
-## Purpose
-
-Both packages in the monorepo SHALL be publishable to npm under the `@lanquarden` scope.
-`@lanquarden/pi-dev-worktrees` SHALL be discoverable and auto-installable by the pi
-package system. `@lanquarden/pi-dev-worktrees-dashboard-plugin` SHALL be discoverable
-via the npm registry as a pi-agent-dashboard plugin.
-
----
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: `@lanquarden/pi-dev-worktrees` SHALL declare a `pi` manifest
 `packages/pi-dev-worktrees/package.json` SHALL contain a `"pi"` key with an
