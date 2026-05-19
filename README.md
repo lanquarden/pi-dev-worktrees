@@ -5,7 +5,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 ## Features
 
 - **`/worktree [branch | off]`** — create or switch to a `wtp`-managed worktree under `.pi/worktrees/`; all bash commands run inside it
-- **`/devcontainer [on | off]`** — target the project devcontainer; bash commands execute inside the container
+- **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; bash commands execute inside the container; `rebuild` forces a full image rebuild with `--no-cache`
 - **`/workspaces`** — snapshot of all active worktrees and container status
 - **`/workspace-cleanup`** — interactive removal of stale worktrees
 - **Tools** (`worktree_set`, `devcontainer_control`, `workspaces_status`, `workspace_remove`) — same operations callable by the LLM or pi-dashboard
@@ -47,6 +47,8 @@ On `/devcontainer on`, the extension:
 1. Generates `.pi/devcontainer.override.json` that mounts the project at the same absolute path inside the container
 2. Probes the container with `devcontainer exec ... -- echo ok`; if not running, spawns `devcontainer up` in the background
 3. All bash tool calls are wrapped with `devcontainer exec --workspace-folder <root> --override-config .pi/devcontainer.override.json -- sh -c '...'`
+
+Use `/devcontainer rebuild` instead of `/devcontainer on` when the `Dockerfile` or base image has changed. It runs the same lifecycle (stop → regenerate override → start) but passes `--no-cache` to `devcontainer up`, forcing Docker to rebuild all image layers from scratch. Rebuilds take longer than a normal start.
 
 ### Composition
 
