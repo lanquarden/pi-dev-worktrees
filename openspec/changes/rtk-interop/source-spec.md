@@ -1,7 +1,7 @@
 # Exploration: `pi-rtk` interoperability & plugin tool-call ordering
 
 **Date:** 2026-05-19
-**Status:** Exploration — recommendation updated after studying all three RTK plugins
+**Status:** Partially addressed (load order docs + conflict detection + user_bash; absorption fallback pending)
 **Scope:** Conflict between `pi-dev-worktrees` and RTK-family extensions; RTK-in-container requirement. Three RTK plugins studied. Recommended path: use `pi-rtk-optimizer` with documented load order; absorb internally only if the load-order constraint proves too brittle.
 
 ---

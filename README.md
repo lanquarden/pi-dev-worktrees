@@ -16,6 +16,70 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 - [`wtp`](https://github.com/nicholasgasior/wtp) v2+ (for worktree features)
 - `devcontainer` CLI (for container features)
 
+## Companion extensions
+
+[`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) is the recommended companion extension for token compression. It rewrites bash commands to pipe output through `rtk compress`, significantly reducing context consumption.
+
+### Why `pi install` is wrong
+
+`pi install npm:pi-rtk-optimizer` places the extension at **rank 4** (packages), which loads *after* all project-local and global extensions — including `pi-dev-worktrees`. This puts it in the wrong position: `pi-rtk-optimizer` must mutate `event.input.command` *before* `pi-dev-worktrees` wraps it in `devcontainer exec`.
+
+### Correct setup — `settings.json` `extensions` array
+
+Both extensions must appear in the **same** `settings.json` `extensions` array with `pi-rtk-optimizer` listed first. Array position within a rank is fully deterministic:
+
+```json
+// .pi/settings.json  (project-level)
+{
+  "extensions": [
+    "/path/to/pi-rtk-optimizer",
+    "/path/to/pi-dev-worktrees"
+  ]
+}
+```
+
+Or for global configuration:
+
+```json
+// ~/.pi/agent/settings.json
+{
+  "extensions": [
+    "/path/to/pi-rtk-optimizer",
+    "/path/to/pi-dev-worktrees"
+  ]
+}
+```
+
+With this order, `tool_call` handlers fire as: `pi-rtk-optimizer` rewrites the raw command → `pi-dev-worktrees` wraps the rewritten command in `devcontainer exec`. Correct composition.
+
+### RTK-in-container
+
+When `pi-rtk-optimizer` rewrites a command to include `| rtk compress`, that pipe runs *inside* the container when devcontainer routing is active. `rtk` must be available in the container.
+
+Add `rtk` via `postCreateCommand` or `postCreateHooks` in `devcontainer.json`:
+
+```jsonc
+// .devcontainer/devcontainer.json
+{
+  "postCreateCommand": "cp $(which rtk) /usr/local/bin/rtk"
+}
+```
+
+Or, if the container does not have the host `rtk` on its path at build time, install it during setup:
+
+```jsonc
+{
+  "postCreateCommand": "curl -fsSL https://raw.githubusercontent.com/MasuRii/rtk/main/install.sh | sh"
+}
+```
+
+`pi-dev-worktrees` probes for `rtk` in the container at container-ready time and emits a one-time advisory if it is absent.
+
+## Incompatible extensions
+
+- **`@sherif-fanous/pi-rtk`** — uses a `spawnHook`-based bash tool replacement. `spawnHook` fires *after* all `tool_call` handlers, so it receives the fully-wrapped `devcontainer exec ... -- sh -c '...'` string instead of the inner command. This breaks container routing silently. Do not load alongside `pi-dev-worktrees`.
+- **`mcowger/pi-rtk`** — stale (no active maintenance), superseded by `pi-rtk-optimizer`. Uses only `tool_result` (no conflict), but not recommended for new setups.
+
 ## Installation
 
 Copy to (or symlink from) your global pi extensions directory:
@@ -62,6 +126,16 @@ devcontainer exec ... -- sh -c 'cd .pi/worktrees/feature/auth && <cmd>'
 ### HOST: escape hatch
 
 Prefix any bash command with `HOST:` to bypass all routing and run directly on the host.
+
+### `!<cmd>` user bash routing
+
+`pi-dev-worktrees` hooks the `user_bash` event so interactive `!<cmd>` commands follow the same routing decision table as LLM-initiated bash calls:
+
+- **Worktree active, no container:** `!npm test` executes as `cd '<worktree-path>' || ...; npm test`
+- **Container active:** `!npm test` executes as `devcontainer exec ... -- sh -c 'cd <workspace> && npm test'`
+- **`!!<cmd>` (double-bang):** NOT intercepted — pi handles it normally without worktree or container routing (same policy as `pi-rtk-optimizer`)
+- **`HOST:<cmd>`:** strips the prefix and runs on the host, bypassing all routing
+- **No worktree, no container:** command runs unchanged on the host
 
 ### git/gh/hub/find passthrough
 
