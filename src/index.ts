@@ -19,7 +19,7 @@ import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
-import { detectRtkConflicts } from "./rtk-compat.js";
+import { detectRtkConflicts, probeContainerRtk } from "./rtk-compat.js";
 import type { BashRouting } from "./bash-intercept.js";
 import { registerDashboardUi, setDashboardProjectRoot, invalidateDashboardUi } from "./dashboard-ui.js";
 import {
@@ -60,6 +60,10 @@ let projectRoot = "";
 // Last bash routing decision — read by the tool_result hook to prefix output.
 // Reset to null before each tool_call so unrelated tool results don't inherit it.
 let lastBashRouting: BashRouting | null = null;
+
+// Whether rtk is available in the active devcontainer.
+// In-memory only — re-evaluated at each container-ready transition.
+let containerRtkAvailable: boolean = false;
 
 // ──────────────────────────────────────────────
 // Pure helpers
@@ -638,6 +642,22 @@ export default function (pi: ExtensionAPI) {
         // No notify — the [container] prefix on the first tool result is
         // sufficient; an inline notify card would mask the actual output
         // in the dashboard.
+        // Probe for rtk in the container if pi-rtk-optimizer is loaded.
+        if (pi.getCommands().some((c) => c.name === "rtk")) {
+          const { containerId } = readStartupOutcome(projectRoot);
+          probeContainerRtk(projectRoot, containerId).then((available) => {
+            containerRtkAvailable = available;
+            if (!available) {
+              ctx.ui.notify(
+                `pi-dev-worktrees: rtk is not found inside the devcontainer. ` +
+                  `Commands rewritten by pi-rtk-optimizer to include "| rtk compress" will fail inside the container. ` +
+                  `To fix, add rtk to the container via postCreateCommand in devcontainer.json:\n` +
+                  `  "postCreateCommand": "curl -fsSL https://pi-rtk.example.com/install.sh | sh"`,
+                "info",
+              );
+            }
+          });
+        }
       } else {
         // No outcome line yet — container still starting; try a direct exec probe
         // as a fallback (handles cases where devcontainer up doesn't write JSON).
@@ -649,6 +669,22 @@ export default function (pi: ExtensionAPI) {
           emitStateUpdate(pi, state);
           ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
           // No notify — same reason as above.
+          // Probe for rtk in the container if pi-rtk-optimizer is loaded.
+          if (pi.getCommands().some((c) => c.name === "rtk")) {
+            const { containerId: probeContainerId } = readStartupOutcome(projectRoot);
+            probeContainerRtk(projectRoot, probeContainerId).then((available) => {
+              containerRtkAvailable = available;
+              if (!available) {
+                ctx.ui.notify(
+                  `pi-dev-worktrees: rtk is not found inside the devcontainer. ` +
+                    `Commands rewritten by pi-rtk-optimizer to include "| rtk compress" will fail inside the container. ` +
+                    `To fix, add rtk to the container via postCreateCommand in devcontainer.json:\n` +
+                    `  "postCreateCommand": "curl -fsSL https://pi-rtk.example.com/install.sh | sh"`,
+                  "info",
+                );
+              }
+            });
+          }
         }
       }
     }
