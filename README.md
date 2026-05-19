@@ -59,9 +59,9 @@ devcontainer exec ... -- sh -c 'cd .pi/worktrees/feature/auth && <cmd>'
 
 Prefix any bash command with `HOST:` to bypass all routing and run directly on the host.
 
-### git/gh/hub passthrough
+### git/gh/hub/find passthrough
 
-`git`, `gh`, and `hub` commands always run on the host regardless of worktree/container state.
+`git`, `gh`, `hub`, and `find` commands always run on the host regardless of worktree/container state.
 
 ## Dashboard compatibility
 

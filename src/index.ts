@@ -20,7 +20,16 @@ import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
 import type { BashRouting } from "./bash-intercept.js";
 import { registerDashboardUi, setDashboardProjectRoot, invalidateDashboardUi } from "./dashboard-ui.js";
-import { ensureWtpYml, createOrTargetWorktree } from "./worktrees.js";
+import {
+  ensureWtpYml,
+  createOrTargetWorktree,
+  readWtpYml,
+  writeWtpYml,
+  listHooks,
+  addCommandHook,
+  removeHook,
+  formatHook,
+} from "./worktrees.js";
 import {
   findDevcontainerConfig,
   generateOverrideJson,
@@ -119,6 +128,7 @@ function enumerateWorktreeDirs(
 interface ActionResult {
   ok: boolean;
   message: string;
+  hookOutput?: string;
 }
 
 function worktreeStatus(): ActionResult {
@@ -162,8 +172,11 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
   const isNew = !existsSync(existingPath);
 
   let worktreePath: string;
+  let hookOutput = "";
   try {
-    worktreePath = createOrTargetWorktree(branch, projectRoot);
+    const result = createOrTargetWorktree(branch, projectRoot);
+    worktreePath = result.path;
+    hookOutput = result.hookOutput;
   } catch (err) {
     return { ok: false, message: `Failed to create worktree: ${String(err)}` };
   }
@@ -176,7 +189,7 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
   else emitWorkspaceSwitched(pi, branch, worktreePath, projectRoot);
   emitStateUpdate(pi, state);
 
-  return { ok: true, message: `Worktree active: ${relPath}/ — bash runs there` };
+  return { ok: true, message: `Worktree active: ${relPath}/ — bash runs there`, hookOutput };
 }
 
 function devcontainerStatus(): ActionResult {
@@ -309,6 +322,186 @@ function workspacesSnapshot(): string {
   lines.push("");
   lines.push(`Current session: worktree=${state.worktree?.branch ?? "off"}  devcontainer=${state.devcontainer?.enabled ? "on" : "off"}`);
   return lines.join("\n");
+}
+
+// ──────────────────────────────────────────────
+// Hook management helpers
+// ──────────────────────────────────────────────
+
+function worktreeHooksShow(projectRoot: string): ActionResult {
+  const config = readWtpYml(projectRoot);
+  if (!config) {
+    return { ok: true, message: "No .wtp.yml found. Run /worktree init or /worktree hooks add <cmd> to create one." };
+  }
+  const hooks = listHooks(config);
+  if (hooks.length === 0) {
+    return { ok: true, message: "No post_create hooks defined. Use /worktree hooks add <cmd> to add one." };
+  }
+  const lines = ["post_create hooks (.wtp.yml):"];
+  hooks.forEach((hook, i) => {
+    lines.push(`  [${i + 1}] ${formatHook(hook)}`);
+  });
+  lines.push("");
+  lines.push("Use /worktree hooks add <command> to append a command hook.");
+  lines.push("Use /worktree hooks remove <n> to remove a hook by index.");
+  return { ok: true, message: lines.join("\n") };
+}
+
+function worktreeHooksAdd(command: string, projectRoot: string): ActionResult {
+  if (!command.trim()) {
+    return { ok: true, message: "Usage: /worktree hooks add <command>" };
+  }
+  let config = readWtpYml(projectRoot);
+  if (!config) {
+    // Create default config structure
+    config = {
+      version: "1.0",
+      defaults: { base_dir: ".pi/worktrees" },
+      hooks: { post_create: [] },
+    };
+  }
+  const updatedConfig = addCommandHook(config, command.trim());
+  writeWtpYml(projectRoot, updatedConfig);
+  const n = listHooks(updatedConfig).length;
+  return { ok: true, message: `Added hook [${n}]: ${command.trim()}` };
+}
+
+async function worktreeHooksRemove(
+  indexStr: string,
+  projectRoot: string,
+  ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
+): Promise<void> {
+  const config = readWtpYml(projectRoot);
+  if (!config) {
+    ctx.ui.notify("No hooks to remove.", "info");
+    return;
+  }
+  const hooks = listHooks(config);
+  if (hooks.length === 0) {
+    ctx.ui.notify("No hooks to remove.", "info");
+    return;
+  }
+  const index = parseInt(indexStr, 10);
+  if (isNaN(index) || index < 1 || index > hooks.length) {
+    ctx.ui.notify("Invalid index. Run /worktree hooks to see hook numbers.", "warning");
+    return;
+  }
+  const hookDesc = formatHook(hooks[index - 1]);
+  const confirmed = await ctx.ui.confirm(
+    `Remove hook [${index}]: ${hookDesc}?`,
+    "This will remove the hook from .wtp.yml.",
+  );
+  if (!confirmed) {
+    ctx.ui.notify("Cancelled", "info");
+    return;
+  }
+  const updatedConfig = removeHook(config, index);
+  writeWtpYml(projectRoot, updatedConfig);
+  ctx.ui.notify(`Removed hook [${index}]: ${hookDesc}`, "info");
+}
+
+async function worktreeHooksClear(
+  projectRoot: string,
+  ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
+): Promise<void> {
+  const config = readWtpYml(projectRoot);
+  if (!config) {
+    ctx.ui.notify("No post_create hooks to clear.", "info");
+    return;
+  }
+  const hooks = listHooks(config);
+  if (hooks.length === 0) {
+    ctx.ui.notify("No post_create hooks to clear.", "info");
+    return;
+  }
+  const confirmed = await ctx.ui.confirm(
+    "Clear all post_create hooks?",
+    `This will remove all ${hooks.length} hook(s) from .wtp.yml.`,
+  );
+  if (!confirmed) {
+    ctx.ui.notify("Cancelled", "info");
+    return;
+  }
+  const updatedConfig = { ...config, hooks: { ...config.hooks, post_create: [] } };
+  writeWtpYml(projectRoot, updatedConfig);
+  ctx.ui.notify("Cleared all post_create hooks.", "info");
+}
+
+async function worktreeInit(
+  projectRoot: string,
+  ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
+): Promise<void> {
+  const existingConfig = readWtpYml(projectRoot);
+  if (existingConfig) {
+    const confirmed = await ctx.ui.confirm(
+      "Regenerate .wtp.yml?",
+      "This will overwrite existing hooks and settings.",
+    );
+    if (!confirmed) {
+      ctx.ui.notify("Aborted — .wtp.yml unchanged.", "info");
+      return;
+    }
+  }
+
+  const commandsInput = await ctx.ui.input(
+    "Setup commands (comma-separated, blank to skip):",
+    "npm install, mise install",
+  );
+  const copyInput = await ctx.ui.input(
+    "Files to copy from main worktree (comma-separated, blank to skip):",
+    ".env, .secrets",
+  );
+
+  const commandHooks: Array<{ type: string; command: string }> = commandsInput
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((cmd) => ({ type: "command", command: cmd }));
+
+  const copyHooks: Array<{ type: string; from: string; to: string }> = copyInput
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((f) => ({ type: "copy", from: f, to: f }));
+
+  const allHooks = [...commandHooks, ...copyHooks];
+
+  if (allHooks.length === 0) {
+    // Write default template
+    ensureWtpYml(projectRoot);
+    // ensureWtpYml doesn't overwrite, so write directly
+    const { writeFileSync } = await import("node:fs");
+    const { join: pathJoin } = await import("node:path");
+    const WTP_DEFAULT = `version: "1.0"
+defaults:
+  base_dir: ".pi/worktrees"
+
+hooks:
+  post_create:
+    # Copy gitignored secrets from the main repo into the new worktree
+    - type: command
+      command: |
+        MAIN=$(git worktree list --porcelain | head -1 | awk '{print $2}')
+        for f in $(git -C "$MAIN" ls-files --others --ignored --exclude-standard 2>/dev/null | grep -v '/'); do
+          [ -f "$MAIN/$f" ] && cp "$MAIN/$f" . && echo "Copied $f"
+        done
+
+    # Allow direnv if .envrc is present
+    - type: command
+      command: "[ -f .envrc ] && direnv allow || true"
+`;
+    writeFileSync(pathJoin(projectRoot, ".wtp.yml"), WTP_DEFAULT, "utf8");
+    ctx.ui.notify("Written .wtp.yml with default hooks.", "info");
+    return;
+  }
+
+  const config: import("./worktrees.js").WtpConfig = {
+    version: "1.0",
+    defaults: { base_dir: ".pi/worktrees" },
+    hooks: { post_create: allHooks as import("./worktrees.js").WtpHook[] },
+  };
+  writeWtpYml(projectRoot, config);
+  ctx.ui.notify(`Written .wtp.yml with ${allHooks.length} post_create hook(s).`, "info");
 }
 
 // ──────────────────────────────────────────────
@@ -465,6 +658,39 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
+      if (arg === "init") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        await worktreeInit(projectRoot, ctx);
+        return;
+      }
+      if (arg === "hooks" || arg === "hooks show") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const r = worktreeHooksShow(projectRoot);
+        ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+        return;
+      }
+      if (arg.startsWith("hooks add ")) {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const cmd = arg.slice("hooks add ".length).trim();
+        const r = worktreeHooksAdd(cmd, projectRoot);
+        ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+        return;
+      }
+      if (arg === "hooks add") {
+        ctx.ui.notify("Usage: /worktree hooks add <command>", "info");
+        return;
+      }
+      if (arg.startsWith("hooks remove ")) {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const idxStr = arg.slice("hooks remove ".length).trim();
+        await worktreeHooksRemove(idxStr, projectRoot, ctx);
+        return;
+      }
+      if (arg === "hooks clear") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        await worktreeHooksClear(projectRoot, ctx);
+        return;
+      }
       if (!isWtpAvailable()) {
         ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning");
         return;
@@ -479,6 +705,9 @@ export default function (pi: ExtensionAPI) {
       const r = worktreeSet(arg, pi);
       ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
       ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+      if (r.ok && r.hookOutput) {
+        ctx.ui.notify(r.hookOutput, "info");
+      }
     },
   });
 

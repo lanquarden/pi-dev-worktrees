@@ -277,7 +277,7 @@ Registered via `pi.on("tool_call", ...)`, only fires for `event.toolName === "ba
 | # | Condition | Action |
 |---|-----------|--------|
 | 1 | `cmd.match(/^HOST:/i)` | Strip `HOST:` prefix; pass through unchanged (host, original cwd) |
-| 2 | `cmd.match(/^(git|gh|hub) /)` | Pass through unchanged (run on host) |
+| 2 | `cmd.match(/^(git|gh|hub|find)(\s|$)/)` | Pass through unchanged (run on host) |
 | 3 | `devcontainer.enabled && devcontainer.starting` | Replace cmd with error: elapsed time + log tail + restart hints (`exit 1`) |
 | 4 | `devcontainer.enabled && !devcontainer.starting` | Re-probe liveness; if ready wrap with `devcontainer exec …`; if probe fails → same error as rule 3 |
 | 5 | `worktree.path` set | Prepend `cd <worktree-path> && ` |

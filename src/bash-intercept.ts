@@ -3,7 +3,7 @@
  *
  * Decision table (first match wins):
  * 1. HOST: prefix → strip prefix, pass through on host, routing="host"
- * 2. git/gh/hub commands → pass through on host unchanged, routing="host"
+ * 2. git/gh/hub/find commands → pass through on host unchanged, routing="host"
  * 3. devcontainer.enabled && starting → replace with "still starting" error
  * 4. devcontainer.enabled && !starting → probe, wrap with devcontainer exec, routing="container"
  * 5. worktree.path set → prepend cd <path> &&, routing="host"
@@ -138,8 +138,8 @@ export async function applyBashIntercept(
     return { command: cmd.replace(/^HOST:/i, "").trimStart(), routing: "host" };
   }
 
-  // Rule 2: git/gh/hub — pass through unchanged (always run on host)
-  if (/^(git|gh|hub) /.test(cmd)) {
+  // Rule 2: git/gh/hub/find — pass through unchanged (always run on host)
+  if (/^(git|gh|hub|find)(\s|$)/.test(cmd)) {
     return { command: cmd, routing: "host" };
   }
 

@@ -59,9 +59,9 @@ describe("Rule 1 — HOST: prefix strips prefix and passes through", () => {
   });
 });
 
-// ── Rule 2: git/gh/hub pass-through ──────────────────────────────────────────
+// ── Rule 2: git/gh/hub/find pass-through ─────────────────────────────────────
 
-describe("Rule 2 — git/gh/hub pass through unchanged", () => {
+describe("Rule 2 — git/gh/hub/find pass through unchanged", () => {
   const containerState: WorktreesState = {
     devcontainer: { enabled: true, workspace: ROOT, starting: false },
     worktree: { branch: "feature/x", path: "/project/.pi/worktrees/feature/x" },
@@ -84,6 +84,10 @@ describe("Rule 2 — git/gh/hub pass through unchanged", () => {
 
   it("passes hub commands through", async () => {
     expect(await intercept("hub pull-request", containerState)).toBe("hub pull-request");
+  });
+
+  it("passes find commands through", async () => {
+    expect(await intercept("find . -name '*.ts'", containerState)).toBe("find . -name '*.ts'");
   });
 
   it("does NOT match 'github-cli ...' (only exact prefix)", async () => {
@@ -562,6 +566,10 @@ describe("InterceptResult routing metadata", () => {
 
   it("gh command → routing='host'", async () => {
     expect(await interceptRouting("gh pr list", emptyState())).toBe("host");
+  });
+
+  it("find command → routing='host'", async () => {
+    expect(await interceptRouting("find . -type f", emptyState())).toBe("host");
   });
 
   it("passthrough (no worktree, no container) → routing='host'", async () => {
