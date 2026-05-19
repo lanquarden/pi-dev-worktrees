@@ -31,6 +31,7 @@ import {
   addCommandHook,
   removeHook,
   formatHook,
+  listWtpWorktrees,
 } from "./worktrees.js";
 import type { WtpHook } from "./worktrees.js";
 import {
@@ -332,17 +333,7 @@ function workspacesSnapshot(): string {
 
   if (existsSync(worktreesRoot)) {
     try {
-      const wtList = execSync("wtp list --quiet", { cwd: projectRoot, encoding: "utf8" }).trim();
-      if (wtList) {
-        for (const line of wtList.split("\n")) {
-          const branch = line.trim();
-          // "@" is the main worktree marker — skip it
-          if (!branch || branch === "@") continue;
-          const wtPath = join(worktreesRoot, branch);
-          if (!existsSync(wtPath)) continue;
-          worktreeEntries.push({ branch, path: wtPath });
-        }
-      }
+      worktreeEntries = listWtpWorktrees(projectRoot, worktreesRoot);
     } catch {
       worktreeEntries = enumerateWorktreeDirs(worktreesRoot, worktreesRoot);
     }
