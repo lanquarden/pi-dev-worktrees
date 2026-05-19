@@ -18,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
+import { detectRtkConflicts } from "./rtk-compat.js";
 import type { BashRouting } from "./bash-intercept.js";
 import { registerDashboardUi, setDashboardProjectRoot, invalidateDashboardUi } from "./dashboard-ui.js";
 import {
@@ -566,6 +567,7 @@ export default function (pi: ExtensionAPI) {
     } catch { /* non-fatal */ }
 
     ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+    detectRtkConflicts(pi, ctx);
     setDashboardProjectRoot(projectRoot);
     // Trigger a fresh probe now that projectRoot is known and state is
     // restored. This ensures the footer-segment and modal reflect the
