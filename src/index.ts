@@ -12,7 +12,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
@@ -32,6 +32,12 @@ import {
   removeHook,
   formatHook,
 } from "./worktrees.js";
+import type { WtpHook } from "./worktrees.js";
+import {
+  loadPluginConfig,
+  resolveWorktreeRoot,
+  resolvePostCreateHooks,
+} from "./config.js";
 import {
   findDevcontainerConfig,
   generateOverrideJson,
@@ -56,6 +62,10 @@ import {
 
 // Module-level project root — resolved once in session_start
 let projectRoot = "";
+
+// Per-repo config resolved at session_start
+let resolvedWorktreeRoot: string = ".pi/worktrees";
+let resolvedPostCreateHooks: WtpHook[] = [];
 
 // Last bash routing decision — read by the tool_result hook to prefix output.
 // Reset to null before each tool_call so unrelated tool results don't inherit it.
@@ -166,7 +176,7 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
   } catch { /* ignore */ }
 
   try {
-    const generated = ensureWtpYml(projectRoot);
+    const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
     if (generated) {
       // non-fatal notice — caller can surface this
     }
@@ -174,13 +184,14 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
     return { ok: false, message: `Failed to write .wtp.yml: ${String(err)}` };
   }
 
-  const existingPath = join(projectRoot, ".pi", "worktrees", branch);
+  const resolvedRoot = resolve(projectRoot, resolvedWorktreeRoot);
+  const existingPath = join(resolvedRoot, branch);
   const isNew = !existsSync(existingPath);
 
   let worktreePath: string;
   let hookOutput = "";
   try {
-    const result = createOrTargetWorktree(branch, projectRoot);
+    const result = createOrTargetWorktree(branch, projectRoot, resolvedWorktreeRoot);
     worktreePath = result.path;
     hookOutput = result.hookOutput;
   } catch (err) {
@@ -315,8 +326,8 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
 function workspacesSnapshot(): string {
   if (!projectRoot) return "Not in a git repository";
 
-  const lines: string[] = ["Worktrees (.pi/worktrees/):"];
-  const worktreesRoot = join(projectRoot, ".pi", "worktrees");
+  const lines: string[] = [`Worktrees (${resolvedWorktreeRoot}/):`,];
+  const worktreesRoot = resolve(projectRoot, resolvedWorktreeRoot);
   let worktreeEntries: Array<{ branch: string; path: string }> = [];
 
   if (existsSync(worktreesRoot)) {
@@ -325,7 +336,7 @@ function workspacesSnapshot(): string {
       if (wtList) {
         for (const line of wtList.split("\n")) {
           const wtPath = line.trim();
-          if (!wtPath || !wtPath.startsWith(join(projectRoot, ".pi", "worktrees"))) continue;
+          if (!wtPath || !wtPath.startsWith(worktreesRoot)) continue;
           worktreeEntries.push({ branch: relative(worktreesRoot, wtPath), path: wtPath });
         }
       }
@@ -397,7 +408,7 @@ function worktreeHooksAdd(command: string, projectRoot: string): ActionResult {
     // Create default config structure
     config = {
       version: "1.0",
-      defaults: { base_dir: ".pi/worktrees" },
+      defaults: { base_dir: resolvedWorktreeRoot },
       hooks: { post_create: [] },
     };
   }
@@ -508,14 +519,12 @@ async function worktreeInit(
   const allHooks = [...commandHooks, ...copyHooks];
 
   if (allHooks.length === 0) {
-    // Write default template
-    ensureWtpYml(projectRoot);
-    // ensureWtpYml doesn't overwrite, so write directly
+    // Write default template using ensureWtpYml then overwrite if needed
     const { writeFileSync } = await import("node:fs");
     const { join: pathJoin } = await import("node:path");
     const WTP_DEFAULT = `version: "1.0"
 defaults:
-  base_dir: ".pi/worktrees"
+  base_dir: ${JSON.stringify(resolvedWorktreeRoot)}
 
 hooks:
   post_create:
@@ -538,7 +547,7 @@ hooks:
 
   const config: import("./worktrees.js").WtpConfig = {
     version: "1.0",
-    defaults: { base_dir: ".pi/worktrees" },
+    defaults: { base_dir: resolvedWorktreeRoot },
     hooks: { post_create: allHooks as import("./worktrees.js").WtpHook[] },
   };
   writeWtpYml(projectRoot, config);
@@ -566,9 +575,18 @@ export default function (pi: ExtensionAPI) {
 
     if (!projectRoot) return;
 
+    // Resolve per-repo config once at session start
+    let remoteUrl = "";
     try {
-      const generated = ensureWtpYml(projectRoot);
-      if (generated) ctx.ui.notify("Generated .wtp.yml (base_dir: .pi/worktrees)", "info");
+      remoteUrl = execSync("git remote get-url origin", { cwd: projectRoot, encoding: "utf8" }).trim();
+    } catch { /* no origin remote — treat as empty */ }
+    const pluginConfig = loadPluginConfig();
+    resolvedWorktreeRoot = resolveWorktreeRoot(remoteUrl, pluginConfig);
+    resolvedPostCreateHooks = resolvePostCreateHooks(remoteUrl, pluginConfig);
+
+    try {
+      const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
+      if (generated) ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
     } catch { /* non-fatal */ }
 
     ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
@@ -801,8 +819,8 @@ export default function (pi: ExtensionAPI) {
       }
       // Ensure wtp.yml — surface notice here since tools silently skip it
       try {
-        const generated = ensureWtpYml(projectRoot);
-        if (generated) ctx.ui.notify("Generated .wtp.yml (base_dir: .pi/worktrees)", "info");
+        const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
+        if (generated) ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
       } catch (err) {
         ctx.ui.notify(`Failed to write .wtp.yml: ${String(err)}`, "warning");
       }
@@ -869,8 +887,8 @@ export default function (pi: ExtensionAPI) {
       if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
       if (!isWtpAvailable()) { ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning"); return; }
 
-      const worktreesRoot = join(projectRoot, ".pi", "worktrees");
-      if (!existsSync(worktreesRoot)) { ctx.ui.notify("No worktrees directory found (.pi/worktrees/)", "info"); return; }
+      const worktreesRoot = resolve(projectRoot, resolvedWorktreeRoot);
+      if (!existsSync(worktreesRoot)) { ctx.ui.notify(`No worktrees directory found (${resolvedWorktreeRoot}/)`, "info"); return; }
 
       const entries = enumerateWorktreeDirs(worktreesRoot, worktreesRoot);
       if (entries.length === 0) { ctx.ui.notify("No worktrees found", "info"); return; }
