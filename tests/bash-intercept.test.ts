@@ -274,9 +274,9 @@ describe("Rule 5 — worktree active, no container", () => {
 
   it("prepends cd (with failure guard) to the worktree path", async () => {
     const result = await intercept("npm test", worktreeState);
-    // cdSafe: cd '<path>' || { echo "pi-worktrees: ..." >&2; exit 1; }; <cmd>
+    // cdSafe: cd '<path>' || { echo "pi-dev-worktrees: ..." >&2; exit 1; }; <cmd>
     expect(result).toContain("cd '/project/.pi/worktrees/feature/foo'");
-    expect(result).toContain("pi-worktrees: cannot cd to");
+    expect(result).toContain("pi-dev-worktrees: cannot cd to");
     expect(result).toContain("npm test");
     expect(probe).not.toHaveBeenCalled();
   });
@@ -331,7 +331,7 @@ describe("cdSafe — guarded cd with clear failure message", () => {
   it("includes the target path in the failure message", () => {
     const result = cdSafe("/some/path", "ls");
     expect(result).toContain("/some/path");
-    expect(result).toContain("pi-worktrees: cannot cd to");
+    expect(result).toContain("pi-dev-worktrees: cannot cd to");
   });
 
   it("includes the original command after the guard", () => {
@@ -364,7 +364,7 @@ describe("cdSafe — guarded cd with clear failure message", () => {
     } catch (e: unknown) {
       stderr = (e as { stderr: string }).stderr ?? "";
     }
-    expect(stderr).toContain("pi-worktrees: cannot cd to");
+    expect(stderr).toContain("pi-dev-worktrees: cannot cd to");
     expect(stderr).toContain("/nonexistent/path/xyz");
   });
 });
@@ -390,7 +390,7 @@ describe("Rule 4 — container, no worktree — always cds to containerWorkspace
     };
     const result = await intercept("pwd", state);
     expect(result).toContain("/workspaces/myrepo");
-    expect(result).toContain("pi-worktrees: cannot cd to");
+    expect(result).toContain("pi-dev-worktrees: cannot cd to");
     expect(result).toContain("pwd");
   });
 

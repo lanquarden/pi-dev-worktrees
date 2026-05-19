@@ -1,5 +1,5 @@
 /**
- * pi-worktrees — Pi extension for branch workspace isolation.
+ * pi-dev-worktrees — Pi extension for branch workspace isolation.
  *
  * Provides:
  * - Git worktree management via wtp (/worktree command)
@@ -84,7 +84,7 @@ function resolveProjectRoot(): string {
 }
 
 function buildStatusString(s: WorktreesState): string {
-  const parts: string[] = ["pi-worktrees"];
+  const parts: string[] = ["pi-dev-worktrees"];
   if (s.worktree) parts.push(`branch:${s.worktree.branch}`);
   if (s.devcontainer?.enabled)
     parts.push(s.devcontainer.starting ? "container:starting" : "container:on");
@@ -512,7 +512,7 @@ export default function (pi: ExtensionAPI) {
 
   // Register dashboard UI listeners at init time, NOT inside session_start.
   // The bridge's session_start handler calls refreshUiModules (which emits
-  // ui:list-modules) BEFORE pi-worktrees' session_start runs. Registering
+  // ui:list-modules) BEFORE pi-dev-worktrees' session_start runs. Registering
   // here ensures the ui:list-modules listener is in place before the bridge
   // fires it. projectRoot is set separately via setDashboardProjectRoot().
   registerDashboardUi(pi);
@@ -530,7 +530,7 @@ export default function (pi: ExtensionAPI) {
       if (generated) ctx.ui.notify("Generated .wtp.yml (base_dir: .pi/worktrees)", "info");
     } catch { /* non-fatal */ }
 
-    ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+    ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
     setDashboardProjectRoot(projectRoot);
     // Trigger a fresh probe now that projectRoot is known and state is
     // restored. This ensures the footer-segment and modal reflect the
@@ -542,7 +542,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async () => {
     if (!state.worktree && !state.devcontainer?.enabled) return;
 
-    const lines = ["## Active Workspace (pi-worktrees)"];
+    const lines = ["## Active Workspace (pi-dev-worktrees)"];
     if (state.worktree) {
       lines.push(`- Branch: \`${state.worktree.branch}\``);
       lines.push(`- Worktree path: \`${state.worktree.path}\``);
@@ -563,7 +563,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     return {
-      message: { customType: "pi-worktrees:context", content: lines.join("\n"), display: false },
+      message: { customType: "pi-dev-worktrees:context", content: lines.join("\n"), display: false },
     };
   });
 
@@ -581,7 +581,7 @@ export default function (pi: ExtensionAPI) {
         state.devcontainer.enabled = false;
         saveState(pi, state);
         emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         const reason = outcomeMsg ? `\n${outcomeMsg}` : "";
         ctx.ui.notify(
           `Devcontainer startup failed — targeting disabled. Run /devcontainer logs for details.${reason}`,
@@ -596,7 +596,7 @@ export default function (pi: ExtensionAPI) {
         saveState(pi, state);
         emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
         emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         // No notify — the [container] prefix on the first tool result is
         // sufficient; an inline notify card would mask the actual output
         // in the dashboard.
@@ -609,7 +609,7 @@ export default function (pi: ExtensionAPI) {
           saveState(pi, state);
           emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
           emitStateUpdate(pi, state);
-          ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+          ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
           // No notify — same reason as above.
         }
       }
@@ -654,7 +654,7 @@ export default function (pi: ExtensionAPI) {
       }
       if (arg === "off") {
         const r = worktreeOff(pi);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
@@ -703,7 +703,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`Failed to write .wtp.yml: ${String(err)}`, "warning");
       }
       const r = worktreeSet(arg, pi);
-      ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+      ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
       ctx.ui.notify(r.message, r.ok ? "info" : "warning");
       if (r.ok && r.hookOutput) {
         ctx.ui.notify(r.hookOutput, "info");
@@ -722,13 +722,13 @@ export default function (pi: ExtensionAPI) {
       }
       if (arg === "off") {
         const r = devcontainerOff(pi);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
       if (arg === "on") {
         const r = devcontainerOn(pi);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
@@ -820,7 +820,7 @@ export default function (pi: ExtensionAPI) {
         state.worktree = undefined;
         saveState(pi, state);
         emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-worktrees", buildStatusString(state));
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
       }
 
       ctx.ui.notify(`Removed ${removedCount} worktree(s)`, "info");

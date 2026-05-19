@@ -1,5 +1,5 @@
 /**
- * bash-intercept.ts — Bash command routing logic for pi-worktrees.
+ * bash-intercept.ts — Bash command routing logic for pi-dev-worktrees.
  *
  * Decision table (first match wins):
  * 1. HOST: prefix → strip prefix, pass through on host, routing="host"
@@ -57,12 +57,12 @@ export function shellQuote(s: string): string {
  * ensures the user always sees which path failed and why.
  *
  * Produces:
- *   cd '/the/path' || { echo "pi-worktrees: cannot cd to '/the/path': $?" >&2; exit 1; }; <cmd>
+ *   cd '/the/path' || { echo "pi-dev-worktrees: cannot cd to '/the/path': $?" >&2; exit 1; }; <cmd>
  */
 export function cdSafe(dir: string, cmd: string): string {
   const q = shellQuote(dir);
   return (
-    `cd ${q} || { echo "pi-worktrees: cannot cd to ${q} (exit $?)" >&2; exit 1; }; ${cmd}`
+    `cd ${q} || { echo "pi-dev-worktrees: cannot cd to ${q} (exit $?)" >&2; exit 1; }; ${cmd}`
   );
 }
 

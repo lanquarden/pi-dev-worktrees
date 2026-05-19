@@ -1,5 +1,5 @@
 /**
- * dashboard-ui.ts — pi-agent-dashboard visual feedback for pi-worktrees.
+ * dashboard-ui.ts — pi-agent-dashboard visual feedback for pi-dev-worktrees.
  *
  * Registers two contributions via the pi-dashboard extension-ui-system:
  *
@@ -30,7 +30,7 @@ import { saveState } from "./session.js";
 // Constants
 // ──────────────────────────────────────────────
 
-const NAMESPACE = "pi-worktrees";
+const NAMESPACE = "pi-dev-worktrees";
 const FOOTER_ID = "workspace-state";
 const MODAL_ID = "worktrees-table";
 const MODAL_COMMAND = "/workspaces";
@@ -185,7 +185,7 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
         kind: "footer-segment",
         namespace: NAMESPACE,
         id: FOOTER_ID,
-        payload: { text: footerText, tooltip: "pi-worktrees workspace state" },
+        payload: { text: footerText, tooltip: "pi-dev-worktrees workspace state" },
       });
     } else {
       probe.modules.push({
@@ -203,7 +203,7 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
       id: MODAL_ID,
       command: MODAL_COMMAND,
       title: "Worktrees",
-      description: "Git worktrees managed by pi-worktrees under .pi/worktrees/",
+      description: "Git worktrees managed by pi-dev-worktrees under .pi/worktrees/",
       icon: "mdiSourceBranch",
       category: "Workspace",
       view: {
@@ -254,7 +254,7 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
     const worktreePath = join(worktreesRoot, branch);
 
     if (!existsSync(worktreePath)) {
-      console.warn(`[pi-worktrees] delete-row: worktree not found: ${branch}`);
+      console.warn(`[pi-dev-worktrees] delete-row: worktree not found: ${branch}`);
       invalidateDashboardUi(pi);
       return;
     }
@@ -273,7 +273,7 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
         cwd: _projectRoot, encoding: "utf8", timeout: 10000,
       });
       // Emit removal event directly (avoid circular import with dashboard-events.ts)
-      pi.events.emit("pi-worktrees:workspace-removed", {
+      pi.events.emit("pi-dev-worktrees:workspace-removed", {
         type: "worktree", branch, path: worktreePath, cwd: _projectRoot,
       });
 
@@ -281,10 +281,10 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
         state.worktree = undefined;
         saveState(pi, state);
         // Inline state update event to avoid circular import with dashboard-events.ts
-        pi.events.emit("pi-worktrees:state", state);
+        pi.events.emit("pi-dev-worktrees:state", state);
       }
     } catch (err) {
-      console.error(`[pi-worktrees] delete-row: failed to remove ${branch}:`, err);
+      console.error(`[pi-dev-worktrees] delete-row: failed to remove ${branch}:`, err);
     }
 
     invalidateDashboardUi(pi);

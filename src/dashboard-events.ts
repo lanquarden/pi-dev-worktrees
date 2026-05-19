@@ -1,5 +1,5 @@
 /**
- * dashboard-events.ts — Helpers for emitting pi-worktrees events on the shared event bus.
+ * dashboard-events.ts — Helpers for emitting pi-dev-worktrees events on the shared event bus.
  * The pi-dashboard bridge forwards all pi.events.emit calls automatically.
  */
 
@@ -13,7 +13,7 @@ export function emitWorkspaceCreated(
   path: string,
   cwd: string,
 ): void {
-  pi.events.emit("pi-worktrees:workspace-created", {
+  pi.events.emit("pi-dev-worktrees:workspace-created", {
     type: "worktree",
     branch,
     path,
@@ -28,14 +28,14 @@ export function emitWorkspaceSwitched(
   cwd: string,
 ): void {
   if (branch && path) {
-    pi.events.emit("pi-worktrees:workspace-switched", {
+    pi.events.emit("pi-dev-worktrees:workspace-switched", {
       type: "worktree",
       branch,
       path,
       cwd,
     });
   } else {
-    pi.events.emit("pi-worktrees:workspace-switched", {
+    pi.events.emit("pi-dev-worktrees:workspace-switched", {
       worktree: null,
       cwd,
     });
@@ -43,7 +43,7 @@ export function emitWorkspaceSwitched(
 }
 
 export function emitWorkspaceOff(pi: ExtensionAPI, cwd: string): void {
-  pi.events.emit("pi-worktrees:workspace-switched", {
+  pi.events.emit("pi-dev-worktrees:workspace-switched", {
     worktree: null,
     cwd,
   });
@@ -55,7 +55,7 @@ export function emitWorkspaceRemoved(
   path: string,
   cwd: string,
 ): void {
-  pi.events.emit("pi-worktrees:workspace-removed", {
+  pi.events.emit("pi-dev-worktrees:workspace-removed", {
     type: "worktree",
     branch,
     path,
@@ -68,7 +68,7 @@ export function emitDevcontainerStarting(
   workspace: string,
   cwd: string,
 ): void {
-  pi.events.emit("pi-worktrees:devcontainer-starting", { workspace, cwd });
+  pi.events.emit("pi-dev-worktrees:devcontainer-starting", { workspace, cwd });
 }
 
 export function emitDevcontainerReady(
@@ -76,7 +76,7 @@ export function emitDevcontainerReady(
   workspace: string,
   cwd: string,
 ): void {
-  pi.events.emit("pi-worktrees:devcontainer-ready", { workspace, cwd });
+  pi.events.emit("pi-dev-worktrees:devcontainer-ready", { workspace, cwd });
 }
 
 export function emitDevcontainerStopped(
@@ -84,10 +84,10 @@ export function emitDevcontainerStopped(
   workspace: string,
   cwd: string,
 ): void {
-  pi.events.emit("pi-worktrees:devcontainer-stopped", { workspace, cwd });
+  pi.events.emit("pi-dev-worktrees:devcontainer-stopped", { workspace, cwd });
 }
 
 export function emitStateUpdate(pi: ExtensionAPI, state: WorktreesState): void {
-  pi.events.emit("pi-worktrees:state", state);
+  pi.events.emit("pi-dev-worktrees:state", state);
   invalidateDashboardUi(pi);
 }

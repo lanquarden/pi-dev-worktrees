@@ -1,4 +1,4 @@
-# pi-worktrees
+# pi-dev-worktrees
 
 A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provides isolated branch workspaces using git worktrees (`wtp`) and optional devcontainer targeting.
 
@@ -21,15 +21,15 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 Copy to (or symlink from) your global pi extensions directory:
 
 ```bash
-cp -r . ~/.pi/agent/extensions/pi-worktrees
-cd ~/.pi/agent/extensions/pi-worktrees
+cp -r . ~/.pi/agent/extensions/pi-dev-worktrees
+cd ~/.pi/agent/extensions/pi-dev-worktrees
 npm install
 ```
 
 Or for project-local use:
 
 ```bash
-cp -r . /your/project/.pi/extensions/pi-worktrees
+cp -r . /your/project/.pi/extensions/pi-dev-worktrees
 ```
 
 ## How it works

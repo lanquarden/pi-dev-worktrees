@@ -1,5 +1,5 @@
 {
-  "name": "pi-worktrees",
+  "name": "pi-dev-worktrees",
   "private": true,
   "type": "module",
   "scripts": {

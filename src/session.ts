@@ -1,5 +1,5 @@
 /**
- * session.ts — Per-session state management for pi-worktrees.
+ * session.ts — Per-session state management for pi-dev-worktrees.
  * State is persisted to the session file via pi.appendEntry().
  */
 
@@ -30,7 +30,7 @@ export interface WorktreesState {
 export let state: WorktreesState = {};
 
 /**
- * Scan session entries for "pi-worktrees:state" custom entries,
+ * Scan session entries for "pi-dev-worktrees:state" custom entries,
  * return the last one's data as WorktreesState, or {} if none found.
  */
 export function loadState(ctx: ExtensionContext): WorktreesState {
@@ -38,7 +38,7 @@ export function loadState(ctx: ExtensionContext): WorktreesState {
   let last: WorktreesState | undefined;
 
   for (const entry of entries) {
-    if (entry.type === "custom" && entry.customType === "pi-worktrees:state") {
+    if (entry.type === "custom" && entry.customType === "pi-dev-worktrees:state") {
       last = entry.data as WorktreesState;
     }
   }
@@ -50,5 +50,5 @@ export function loadState(ctx: ExtensionContext): WorktreesState {
  * Persist current state to the session file (fire-and-forget).
  */
 export function saveState(pi: ExtensionAPI, newState: WorktreesState): void {
-  pi.appendEntry("pi-worktrees:state", newState);
+  pi.appendEntry("pi-dev-worktrees:state", newState);
 }

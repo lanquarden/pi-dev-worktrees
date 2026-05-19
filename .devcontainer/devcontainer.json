@@ -1,5 +1,5 @@
 {
-  "name": "pi-worktrees",
+  "name": "pi-dev-worktrees",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
   "workspaceFolder": "${localWorkspaceFolder}",

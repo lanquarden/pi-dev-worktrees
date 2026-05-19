@@ -22,7 +22,7 @@ import type { WtpConfig, WtpHook } from "../src/worktrees.js";
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "pi-worktrees-test-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "pi-dev-worktrees-test-"));
 });
 
 afterEach(() => {
