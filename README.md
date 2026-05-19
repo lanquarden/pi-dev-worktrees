@@ -4,7 +4,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 
 ## Features
 
-- **`/worktree [branch | off | prune]`** — create or switch to a `wtp`-managed worktree under `.pi/worktrees/`; all bash commands run inside it; `prune` clears stale `.git/worktrees/` metadata
+- **`/worktree [branch | off | prune]`** — create or switch to a `wtp`-managed worktree (location configured via `~/.pi/agent/pi-dev-worktrees.config.json` or defaults to `.pi/worktrees/`); all bash commands run inside it; `prune` clears stale `.git/worktrees/` metadata
 - **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; bash commands execute inside the container; `rebuild` forces a full image rebuild with `--no-cache`
 - **`/workspaces`** — snapshot of all active worktrees and container status
 - **`/workspace-cleanup`** — interactive removal of stale worktrees; runs `git worktree prune` after removals to clear any lingering metadata
@@ -101,11 +101,40 @@ cp -r . /your/project/.pi/extensions/pi-dev-worktrees
 ### Worktrees
 
 On `/worktree feature/auth`, the extension:
-1. Auto-generates `.wtp.yml` at the project root (if absent) with `base_dir: .pi/worktrees`
+1. Auto-generates `.wtp.yml` at the project root (if absent) with `base_dir` set to the resolved `worktreeRoot` (see **Per-repo config** below)
 2. Runs `wtp add feature/auth` (or `wtp add -b feature/auth` for new branches)
-3. All subsequent bash tool calls are prefixed with `cd .pi/worktrees/feature/auth &&`
+3. All subsequent bash tool calls are prefixed with `cd <worktree-path> &&`
 
 Run `/worktree prune` to remove stale `.git/worktrees/` metadata entries left behind by manual worktree directory deletions (equivalent to running `git worktree prune` in the project root). `/workspace-cleanup` also runs `git worktree prune` automatically after its removal loop, so ghost entries are cleaned up even if worktrees were deleted outside of git.
+
+### Per-repo config
+
+Create `~/.pi/agent/pi-dev-worktrees.config.json` to configure `base_dir` and post-create hooks per repository. The file is optional — if absent, the default `base_dir` of `.pi/worktrees` is used.
+
+```json
+{
+  "repos": [
+    {
+      "repoGlob": "github.com/myorg/*",
+      "worktreeRoot": "/fast-ssd/worktrees",
+      "postCreateHooks": [
+        { "type": "command", "command": "mise install" },
+        { "type": "copy", "from": ".env.local", "to": ".env.local" }
+      ]
+    },
+    { "repoGlob": "*", "worktreeRoot": ".pi/worktrees" }
+  ]
+}
+```
+
+**Schema:**
+- `repoGlob` — matched against the `origin` remote URL (`git remote get-url origin`). `*` is the only wildcard; it matches any sequence of characters including `/`. Matching is case-sensitive.
+- `worktreeRoot` — path used as `base_dir` in `.wtp.yml`. Relative paths are resolved from the project root; absolute paths are used as-is.
+- `postCreateHooks` *(optional)* — extra hooks appended after the two default hooks (copy-secrets + direnv allow) when `ensureWtpYml` generates a new `.wtp.yml`. Each entry is a `WtpHook` (`type: command | copy | symlink`). Has no effect if `.wtp.yml` already exists.
+
+Entries are evaluated in order; the **first match wins**. If no entry matches, `base_dir` defaults to `.pi/worktrees` and no extra hooks are added.
+
+Config is loaded once at `session_start`. Edit the file and restart the pi session to apply changes.
 
 ### Devcontainer
 
