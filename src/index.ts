@@ -14,6 +14,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
 import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
@@ -676,6 +677,26 @@ export default function (pi: ExtensionAPI) {
       return { ...block, text: prefix + block.text };
     });
     return { content: updated };
+  });
+
+  // ── user_bash: apply worktree / container routing to ! commands ─────────
+  pi.on("user_bash", async (event) => {
+    // !! commands (excludeFromContext=true) are intentionally not intercepted —
+    // same policy as pi-rtk-optimizer. User opted out of context inclusion;
+    // routing would be surprising.
+    if (event.excludeFromContext) return undefined;
+    if (!projectRoot) return undefined;
+
+    const result = await applyBashIntercept(event.command, state, projectRoot);
+    // If routing is "error" the command is already replaced with an error
+    // message command by applyBashIntercept; run it as-is on the host.
+    const localOps = createLocalBashOperations();
+    return {
+      operations: {
+        exec: (cmd: string, cwd: string, opts: Parameters<typeof localOps.exec>[2]) =>
+          localOps.exec(result.command, cwd, opts),
+      },
+    };
   });
 
   // ── Commands (TUI + dashboard via useRpcKeeper) ───────────────────────
