@@ -865,6 +865,12 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.notify(`Removed ${removedCount} worktree(s)`, "info");
+
+      try {
+        execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" });
+      } catch (e) {
+        ctx.ui.notify("git worktree prune failed: " + (e instanceof Error ? e.message : String(e)), "warning");
+      }
     },
   });
 }
