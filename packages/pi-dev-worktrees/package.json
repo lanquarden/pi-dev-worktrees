@@ -1,6 +1,38 @@
 {
-  "name": "pi-dev-worktrees",
+  "name": "@lanquarden/pi-dev-worktrees",
+  "version": "0.1.0",
+  "description": "Pi extension for isolated branch workspaces — git worktrees via wtp and optional devcontainer targeting",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "git",
+    "worktrees",
+    "devcontainer"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-worktrees",
+    "directory": "packages/pi-dev-worktrees"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest"
