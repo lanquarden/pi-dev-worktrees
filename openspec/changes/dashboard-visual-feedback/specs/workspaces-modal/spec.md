@@ -44,8 +44,8 @@ confirm: "Remove this worktree? Any uncommitted changes will be lost." }`.
 - **THEN** `confirm` is a non-empty string (dashboard will prompt before dispatching)
 
 ### Requirement: Delete-row handler removes the worktree
-When `workspaces:delete-row` is emitted on `pi.events` with a `branch` field, the
-extension SHALL remove the corresponding worktree and refresh the modal.
+When `workspaces:delete-row` is emitted on `pi.events` the extension SHALL remove the
+worktree identified by the `branch` field and refresh the modal.
 
 #### Scenario: Remove clean worktree
 - **WHEN** `workspaces:delete-row` fires with `{ branch: "feature/auth" }` and the worktree

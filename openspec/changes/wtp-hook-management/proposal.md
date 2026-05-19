@@ -6,6 +6,16 @@
 
 ---
 
+## Why
+
+`wtp` already has a full hook system and produces rich progress output when running
+`post_create` hooks after worktree creation. The plugin currently calls `wtp add` via
+`execSync`, which captures and discards all of that output silently. Users have no
+visibility into what happened, and no way to configure hooks from within pi — they must
+hand-edit `.wtp.yml` YAML directly. This proposal surfaces the hook output and adds
+first-class hook management commands, closing the UX gap with `@zenobius/pi-worktrees`
+while keeping `wtp` as the hook executor.
+
 ## Problem statement
 
 `wtp` already has a hook system. When you run `wtp add <branch>` it executes the `post_create` hooks defined in `.wtp.yml` and produces rich progress output:

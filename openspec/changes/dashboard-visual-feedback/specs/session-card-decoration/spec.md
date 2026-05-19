@@ -49,9 +49,9 @@ on `pi.events` so the bridge re-probes and the updated `footer-segment` reaches 
 - **THEN** `pi.events.emit("ui:invalidate", { id: "workspace-state" })` is called
 
 ### Requirement: No-dashboard fallback
-When no pi-agent-dashboard bridge is connected, `ui:list-modules` is never emitted and
-`ui:invalidate` calls SHALL be silently ignored. The TUI status bar (`ctx.ui.setStatus`)
-SHALL continue to be the sole feedback path.
+When no pi-agent-dashboard bridge is connected the extension SHALL silently ignore all
+`ui:invalidate` calls and fall back to `ctx.ui.setStatus` as the sole feedback path.
+(`ui:list-modules` is never emitted in this case so no `footer-segment` is registered.)
 
 #### Scenario: Dashboard not connected
 - **WHEN** the extension runs in a plain pi TUI session with no bridge
