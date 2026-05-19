@@ -4,10 +4,10 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 
 ## Features
 
-- **`/worktree [branch | off]`** — create or switch to a `wtp`-managed worktree under `.pi/worktrees/`; all bash commands run inside it
+- **`/worktree [branch | off | prune]`** — create or switch to a `wtp`-managed worktree under `.pi/worktrees/`; all bash commands run inside it; `prune` clears stale `.git/worktrees/` metadata
 - **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; bash commands execute inside the container; `rebuild` forces a full image rebuild with `--no-cache`
 - **`/workspaces`** — snapshot of all active worktrees and container status
-- **`/workspace-cleanup`** — interactive removal of stale worktrees
+- **`/workspace-cleanup`** — interactive removal of stale worktrees; runs `git worktree prune` after removals to clear any lingering metadata
 - **Tools** (`worktree_set`, `devcontainer_control`, `workspaces_status`, `workspace_remove`) — same operations callable by the LLM or pi-dashboard
 
 ## Requirements
@@ -40,6 +40,8 @@ On `/worktree feature/auth`, the extension:
 1. Auto-generates `.wtp.yml` at the project root (if absent) with `base_dir: .pi/worktrees`
 2. Runs `wtp add feature/auth` (or `wtp add -b feature/auth` for new branches)
 3. All subsequent bash tool calls are prefixed with `cd .pi/worktrees/feature/auth &&`
+
+Run `/worktree prune` to remove stale `.git/worktrees/` metadata entries left behind by manual worktree directory deletions (equivalent to running `git worktree prune` in the project root). `/workspace-cleanup` also runs `git worktree prune` automatically after its removal loop, so ghost entries are cleaned up even if worktrees were deleted outside of git.
 
 ### Devcontainer
 
