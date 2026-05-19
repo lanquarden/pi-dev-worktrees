@@ -726,6 +726,16 @@ export default function (pi: ExtensionAPI) {
         await worktreeHooksClear(projectRoot, ctx);
         return;
       }
+      if (arg === "prune") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        try {
+          const output = execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" }).trim();
+          ctx.ui.notify(output || "No stale worktree metadata found.", "info");
+        } catch (e) {
+          ctx.ui.notify("git worktree prune failed: " + (e instanceof Error ? e.message : String(e)), "warning");
+        }
+        return;
+      }
       if (!isWtpAvailable()) {
         ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning");
         return;
