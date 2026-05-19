@@ -335,9 +335,12 @@ function workspacesSnapshot(): string {
       const wtList = execSync("wtp list --quiet", { cwd: projectRoot, encoding: "utf8" }).trim();
       if (wtList) {
         for (const line of wtList.split("\n")) {
-          const wtPath = line.trim();
-          if (!wtPath || !wtPath.startsWith(worktreesRoot)) continue;
-          worktreeEntries.push({ branch: relative(worktreesRoot, wtPath), path: wtPath });
+          const branch = line.trim();
+          // "@" is the main worktree marker — skip it
+          if (!branch || branch === "@") continue;
+          const wtPath = join(worktreesRoot, branch);
+          if (!existsSync(wtPath)) continue;
+          worktreeEntries.push({ branch, path: wtPath });
         }
       }
     } catch {
