@@ -42,8 +42,8 @@
 - [ ] 4.4 Run `/worktree hooks remove 1` — confirm confirmation prompt; confirm hook is removed on accept, unchanged on cancel
 - [ ] 4.5 Run `/worktree hooks clear` — confirm confirmation prompt; confirm all hooks cleared
 - [ ] 4.6 Run `/worktree init` — confirm wizard prompts, confirm `.wtp.yml` is written correctly for both blank and filled inputs
-- [ ] 4.7 Run `npm test` — all tests pass
+- [x] 4.7 Run `npm test` — all tests pass
 
 ### 5. Commit
 
-- [ ] 5.1 Commit with message: `feat: surface wtp hook output and add /worktree hooks management`
+- [x] 5.1 Commit with message: `feat: surface wtp hook output and add /worktree hooks management`
