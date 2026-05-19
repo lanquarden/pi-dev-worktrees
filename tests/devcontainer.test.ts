@@ -441,4 +441,22 @@ describe("buildStartArgs", () => {
     expect(args[args.indexOf("--override-config") + 1]).toBe(OVERRIDE);
     expect(args[args.length - 1]).toBe("--remove-existing-container");
   });
+
+  it("appends --no-cache when noCache=true", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, false, true);
+    expect(args).toContain("--no-cache");
+  });
+
+  it("does NOT include --no-cache when noCache=false (default)", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, false);
+    expect(args).not.toContain("--no-cache");
+  });
+
+  it("--no-cache appears after --remove-existing-container when both are set", () => {
+    const args = buildStartArgs(ROOT, OVERRIDE, true, true);
+    const removeIdx = args.indexOf("--remove-existing-container");
+    const noCacheIdx = args.indexOf("--no-cache");
+    expect(removeIdx).toBeGreaterThan(-1);
+    expect(noCacheIdx).toBeGreaterThan(removeIdx);
+  });
 });
