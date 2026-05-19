@@ -4,16 +4,10 @@
 
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import * as yaml from "js-yaml";
 
-const WTP_YML_CONTENT = `version: "1.0"
-defaults:
-  base_dir: ".pi/worktrees"
-
-hooks:
-  post_create:
-    # Copy gitignored secrets from the main repo into the new worktree
+const DEFAULT_HOOKS_YAML = `    # Copy gitignored secrets from the main repo into the new worktree
     - type: command
       command: |
         MAIN=$(git worktree list --porcelain | head -1 | awk '{print $2}')
@@ -137,13 +131,40 @@ export function formatHook(hook: WtpHook): string {
 /**
  * Ensure .wtp.yml exists at projectRoot. If not, write the default template.
  * Returns true if the file was generated, false if it already existed.
+ *
+ * @param worktreeRoot - Value to use as base_dir (default: ".pi/worktrees")
+ * @param postCreateHooks - Extra hooks to append after the two default hooks
  */
-export function ensureWtpYml(projectRoot: string): boolean {
+export function ensureWtpYml(
+  projectRoot: string,
+  worktreeRoot: string = ".pi/worktrees",
+  postCreateHooks: WtpHook[] = [],
+): boolean {
   const wtpYmlPath = join(projectRoot, ".wtp.yml");
   if (existsSync(wtpYmlPath)) {
     return false;
   }
-  writeFileSync(wtpYmlPath, WTP_YML_CONTENT, "utf8");
+
+  let extraHooksYaml = "";
+  if (postCreateHooks.length > 0) {
+    // Indent each hook entry by 4 spaces to sit under post_create:
+    extraHooksYaml = postCreateHooks
+      .map((hook) => {
+        const lines = yaml.dump([hook], { lineWidth: -1, noRefs: true }).trim().split("\n");
+        return lines.map((l) => `    ${l}`).join("\n");
+      })
+      .join("\n") + "\n";
+  }
+
+  const content = `version: "1.0"
+defaults:
+  base_dir: ${JSON.stringify(worktreeRoot)}
+
+hooks:
+  post_create:
+${DEFAULT_HOOKS_YAML}${extraHooksYaml}`;
+
+  writeFileSync(wtpYmlPath, content, "utf8");
   return true;
 }
 
@@ -158,8 +179,10 @@ export function ensureWtpYml(projectRoot: string): boolean {
 export function createOrTargetWorktree(
   branch: string,
   projectRoot: string,
+  worktreeRoot: string = ".pi/worktrees",
 ): CreateWorktreeResult {
-  const worktreePath = join(projectRoot, ".pi", "worktrees", branch);
+  const resolvedRoot = resolve(projectRoot, worktreeRoot);
+  const worktreePath = join(resolvedRoot, branch);
 
   let hookOutput = "";
 
@@ -206,8 +229,9 @@ export function createOrTargetWorktree(
     }
   }
 
-  // Ensure .pi/worktrees/ is in .gitignore
-  ensureGitignoreEntry(projectRoot, ".pi/worktrees/");
+  // Ensure the worktree root is in .gitignore (only for relative paths under projectRoot)
+  const relEntry = worktreeRoot.startsWith("/") ? null : worktreeRoot.replace(/\/*$/, "/");
+  if (relEntry) ensureGitignoreEntry(projectRoot, relEntry);
 
   return { path: worktreePath, hookOutput };
 }
