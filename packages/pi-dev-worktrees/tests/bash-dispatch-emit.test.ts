@@ -150,25 +150,27 @@ function makeMockCtx(notifySpy: ReturnType<typeof vi.fn>) {
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 let pi: MockPi;
+let sessionNotify: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   vi.clearAllMocks();
   pi = createMockPi();
+  sessionNotify = vi.fn();
 
   // Import and register handlers (fresh module per test is handled by vi.mock hoisting)
   const { default: register } = await import("../src/index.js");
   register(pi as any);
 
-  // Fire session_start so projectRoot is set
-  await pi._emit("session_start", {}, makeMockCtx(vi.fn()));
+  // Fire session_start — the ctx passed here is stored as sessionCtx by the implementation.
+  // All tool_call notify calls go through sessionCtx.ui.notify (the bridge-patched version).
+  await pi._emit("session_start", {}, makeMockCtx(sessionNotify));
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("bash-dispatch emit", () => {
   it("emits bash-dispatch with rtkRewritten=true for RTK rewrite + container routing", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     // Simulate tool_execution_start (LLM's original command)
     await pi._emit("tool_execution_start", {
@@ -188,8 +190,8 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    const [message, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [message, opts] = sessionNotify.mock.calls[0];
     expect(message).toBe("grep foo");
     expect(opts.toolCallId).toBe("tc-1");
     expect(opts.method).toBe("bash-dispatch");
@@ -199,8 +201,7 @@ describe("bash-dispatch emit", () => {
   });
 
   it("emits bash-dispatch with rtkRewritten=false when no RTK rewrite, host routing", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
       toolName: "bash",
@@ -218,8 +219,8 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    const [message, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [message, opts] = sessionNotify.mock.calls[0];
     expect(message).toBe("ls -la");
     expect(opts.method).toBe("bash-dispatch");
     expect(opts.props.rtkRewritten).toBe(false);
@@ -228,8 +229,7 @@ describe("bash-dispatch emit", () => {
   });
 
   it("emits bash-dispatch with routing=host for HOST: prefix escape hatch", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
       toolName: "bash",
@@ -247,15 +247,14 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    const [, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [, opts] = sessionNotify.mock.calls[0];
     expect(opts.props.routing).toBe("host");
     expect(opts.props.rtkRewritten).toBe(false);
   });
 
   it("does NOT emit notify for non-bash tool calls", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
       toolName: "read_file",
@@ -273,12 +272,11 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).not.toHaveBeenCalled();
+    expect(sessionNotify).not.toHaveBeenCalled();
   });
 
   it("clears pendingLlmCommands after tool_call completes", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
       toolName: "bash",
@@ -297,7 +295,7 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    notify.mockClear();
+    sessionNotify.mockClear();
 
     // Second call with same toolCallId — no pending entry, falls back to rtkCommand
     await pi._emit(
@@ -311,15 +309,14 @@ describe("bash-dispatch emit", () => {
     );
 
     // Should still be called (with fallback), and rtkRewritten=false since llmCommand==rtkCommand
-    expect(notify).toHaveBeenCalledOnce();
-    const [, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [, opts] = sessionNotify.mock.calls[0];
     expect(opts.props.rtkRewritten).toBe(false);
     expect(opts.props.llmCommand).toBe("echo hello");
   });
 
   it("falls back to rtkCommand as llmCommand when no tool_execution_start fired", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     // No tool_execution_start — simulate missing entry
     await pi._emit(
@@ -332,8 +329,8 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    const [message, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [message, opts] = sessionNotify.mock.calls[0];
     expect(message).toBe("ls -la");
     expect(opts.props.rtkRewritten).toBe(false);
     expect(opts.props.llmCommand).toBe("ls -la");
@@ -347,8 +344,7 @@ describe("bash-dispatch emit", () => {
       args: { command: "something" },
     });
 
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     // If we then fire a bash tool_call with same id, it should fall back
     await pi._emit(
@@ -361,16 +357,15 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    const [, opts] = notify.mock.calls[0];
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    const [, opts] = sessionNotify.mock.calls[0];
     // Falls back to rtkCommand since no entry was stored
     expect(opts.props.llmCommand).toBe("ls");
     expect(opts.props.rtkRewritten).toBe(false);
   });
 
   it("includes hasDevcontainer=false when no devcontainer in state", async () => {
-    const notify = vi.fn();
-    const ctx = makeMockCtx(notify);
+    const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
       toolName: "bash",
@@ -384,7 +379,7 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(notify).toHaveBeenCalledOnce();
-    expect(notify.mock.calls[0][1].props.hasDevcontainer).toBe(false);
+    expect(sessionNotify).toHaveBeenCalledOnce();
+    expect(sessionNotify.mock.calls[0][1].props.hasDevcontainer).toBe(false);
   });
 });
