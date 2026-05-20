@@ -19,6 +19,7 @@ export function emitWorkspaceCreated(
     path,
     cwd,
   });
+  pi.events.emit("openspec:directory_hint", { path });
 }
 
 export function emitWorkspaceSwitched(
@@ -34,6 +35,7 @@ export function emitWorkspaceSwitched(
       path,
       cwd,
     });
+    pi.events.emit("openspec:directory_hint", { path });
   } else {
     pi.events.emit("pi-dev-worktrees:workspace-switched", {
       worktree: null,
