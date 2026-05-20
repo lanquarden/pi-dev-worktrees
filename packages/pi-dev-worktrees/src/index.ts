@@ -72,6 +72,18 @@ let resolvedPostCreateHooks: WtpHook[] = [];
 // Reset to null before each tool_call so unrelated tool results don't inherit it.
 let lastBashRouting: BashRouting | null = null;
 
+// Keyed by toolCallId. Stores original LLM command (pre-RTK) captured in
+// tool_execution_start. Deleted after consuming in tool_call.
+const pendingLlmCommands = new Map<string, string>();
+
+interface BashDispatchProps {
+  llmCommand: string;
+  rtkRewritten: boolean;
+  rtkCommand?: string;
+  routing: "host" | "container" | "error";
+  hasDevcontainer: boolean;
+}
+
 // Whether rtk is available in the active devcontainer.
 // In-memory only — re-evaluated at each container-ready transition.
 let containerRtkAvailable: boolean = false;
@@ -621,6 +633,14 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
+  // ── tool_execution_start: capture original LLM command (pre-RTK) ────────
+  pi.on("tool_execution_start", (event) => {
+    if (event.toolName !== "bash") return;
+    if (event.toolCallId) {
+      pendingLlmCommands.set(event.toolCallId, (event.args as { command?: string })?.command ?? "");
+    }
+  });
+
   // ── tool_call bash interception ────────────
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash" || !projectRoot) return;
@@ -701,11 +721,34 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    const cmd = (event.input as { command: string }).command;
+    // Capture post-RTK command at handler entry (RTK already ran before this handler)
+    const rtkCommand = (event.input as { command: string }).command;
+
+    // Retrieve original LLM command captured in tool_execution_start
+    const llmCommand = pendingLlmCommands.get(event.toolCallId ?? "") ?? rtkCommand;
+    pendingLlmCommands.delete(event.toolCallId ?? "");
+
+    const rtkRewritten = rtkCommand !== llmCommand;
+
     lastBashRouting = null; // reset before each call
-    const result = await applyBashIntercept(cmd, state, projectRoot);
+    const result = await applyBashIntercept(rtkCommand, state, projectRoot);
     lastBashRouting = result.routing;
     (event.input as { command: string }).command = result.command;
+
+    // Emit in-flight bash-dispatch card to dashboard (no-op when no bridge connected)
+    // ctx.ui.notify is patched by the dashboard bridge to accept opts with toolCallId/method/props.
+    // In TUI context the extra opts are silently ignored.
+    (ctx.ui as any).notify?.(llmCommand, {
+      toolCallId: event.toolCallId,
+      method: "bash-dispatch",
+      props: {
+        llmCommand,
+        rtkRewritten,
+        rtkCommand: rtkRewritten ? rtkCommand : undefined,
+        routing: result.routing,
+        hasDevcontainer: state.devcontainer !== undefined,
+      } satisfies BashDispatchProps,
+    });
   });
 
   // ── tool_result: prefix output with routing context ─────────────────
