@@ -1,6 +1,7 @@
 /**
  * Tests for bash-dispatch emit behaviour: tool_execution_start captures the
- * original LLM command; tool_call emits pi.events.emit("dashboard:notify") with method "bash-dispatch".
+ * original LLM command; tool_call emits pi.events.emit("pi-dev-worktrees:bash-dispatch")
+ * with the flat dispatch payload.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -167,7 +168,7 @@ beforeEach(async () => {
   const { default: register } = await import("../src/index.js");
   register(pi as any);
 
-  // Fire session_start — ctx is passed but sessionCtx is no longer stored.
+  // Fire session_start
   await pi._emit("session_start", {}, makeMockCtx(vi.fn()));
 });
 
@@ -195,15 +196,12 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      message: "grep foo",
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
       toolCallId: "tc-1",
-      method: "bash-dispatch",
-      props: expect.objectContaining({
-        llmCommand: "grep foo",
-        rtkRewritten: true,
-        rtkCommand: "grep foo . | rtk compress",
-      }),
+      llmCommand: "grep foo",
+      rtkRewritten: true,
+      rtkCommand: "grep foo . | rtk compress",
+      routing: "host",
     }));
   });
 
@@ -226,14 +224,12 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      message: "ls -la",
-      method: "bash-dispatch",
-      props: expect.objectContaining({
-        rtkRewritten: false,
-        rtkCommand: undefined,
-        routing: "host",
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      toolCallId: "tc-2",
+      llmCommand: "ls -la",
+      rtkRewritten: false,
+      rtkCommand: undefined,
+      routing: "host",
     }));
   });
 
@@ -256,15 +252,13 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      props: expect.objectContaining({
-        routing: "host",
-        rtkRewritten: false,
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      routing: "host",
+      rtkRewritten: false,
     }));
   });
 
-  it("does NOT emit notify for non-bash tool calls", async () => {
+  it("does NOT emit for non-bash tool calls", async () => {
     const ctx = makeMockCtx(vi.fn());
 
     await pi._emit("tool_execution_start", {
@@ -320,11 +314,9 @@ describe("bash-dispatch emit", () => {
     );
 
     // Should still be called (with fallback), and rtkRewritten=false since llmCommand==rtkCommand
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      props: expect.objectContaining({
-        rtkRewritten: false,
-        llmCommand: "echo hello",
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      rtkRewritten: false,
+      llmCommand: "echo hello",
     }));
   });
 
@@ -342,12 +334,9 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      message: "ls -la",
-      props: expect.objectContaining({
-        rtkRewritten: false,
-        llmCommand: "ls -la",
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      rtkRewritten: false,
+      llmCommand: "ls -la",
     }));
   });
 
@@ -372,11 +361,9 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      props: expect.objectContaining({
-        llmCommand: "ls",
-        rtkRewritten: false,
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      llmCommand: "ls",
+      rtkRewritten: false,
     }));
   });
 
@@ -395,10 +382,8 @@ describe("bash-dispatch emit", () => {
       ctx,
     );
 
-    expect(pi.events.emit).toHaveBeenCalledWith("dashboard:notify", expect.objectContaining({
-      props: expect.objectContaining({
-        hasDevcontainer: false,
-      }),
+    expect(pi.events.emit).toHaveBeenCalledWith("pi-dev-worktrees:bash-dispatch", expect.objectContaining({
+      hasDevcontainer: false,
     }));
   });
 });

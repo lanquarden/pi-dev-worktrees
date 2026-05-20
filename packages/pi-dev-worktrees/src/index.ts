@@ -78,14 +78,6 @@ let lastBashRouting: BashRouting | null = null;
 // tool_execution_start. Deleted after consuming in tool_call.
 const pendingLlmCommands = new Map<string, string>();
 
-interface BashDispatchProps {
-  llmCommand: string;
-  rtkRewritten: boolean;
-  rtkCommand?: string;
-  routing: "host" | "container" | "error";
-  hasDevcontainer: boolean;
-}
-
 // Whether rtk is available in the active devcontainer.
 // In-memory only — re-evaluated at each container-ready transition.
 let containerRtkAvailable: boolean = false;
@@ -738,21 +730,17 @@ export default function (pi: ExtensionAPI) {
     lastBashRouting = result.routing;
     (event.input as { command: string }).command = result.command;
 
-    // Emit in-flight bash-dispatch card to dashboard.
-    // Emit via pi.events — the bridge listens for "dashboard:notify" and
-    // converts it into a prompt_request message. This works because
-    // pi.events is shared across all extensions (unlike ctx.ui which is per-extension).
-    (pi as any).events?.emit("dashboard:notify", {
-      message: llmCommand,
+    // Emit dispatch metadata via pi event bus. The dashboard bridge forwards
+    // all pi.events.emit calls as event_forward messages automatically.
+    // The client event reducer catches "pi-dev-worktrees:bash-dispatch" and
+    // patches the matching tool row with the dispatch data.
+    (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", {
       toolCallId: event.toolCallId,
-      method: "bash-dispatch",
-      props: {
-        llmCommand,
-        rtkRewritten,
-        rtkCommand: rtkRewritten ? rtkCommand : undefined,
-        routing: result.routing,
-        hasDevcontainer: state.devcontainer !== undefined,
-      } satisfies BashDispatchProps,
+      llmCommand,
+      rtkRewritten,
+      rtkCommand: rtkRewritten ? rtkCommand : undefined,
+      routing: result.routing,
+      hasDevcontainer: state.devcontainer !== undefined,
     });
   });
 
