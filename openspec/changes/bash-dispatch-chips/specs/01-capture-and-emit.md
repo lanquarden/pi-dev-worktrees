@@ -1,4 +1,4 @@
-# Spec: Capture LLM command and emit bash-dispatch
+# Spec: Capture LLM command and emit bash-dispatch event
 
 ## File
 `packages/pi-dev-worktrees/src/index.ts`
@@ -6,8 +6,6 @@
 ## New module-level state
 
 ```ts
-// Keyed by toolCallId. Stores original LLM command (pre-RTK) captured in
-// tool_execution_start. Deleted after consuming in tool_call.
 const pendingLlmCommands = new Map<string, string>();
 ```
 
@@ -22,48 +20,35 @@ pi.on("tool_execution_start", (event) => {
 });
 ```
 
-Register this handler alongside the existing `tool_call` handler.
-
 ## Modified: tool_call handler
 
-At the top of the bash `tool_call` handler, after the devcontainer-starting block and before `applyBashIntercept`:
+At handler entry, after devcontainer-starting block, before `applyBashIntercept`:
 
 ```ts
-// Capture post-RTK command (RTK already ran before this handler)
 const rtkCommand = (event.input as { command: string }).command;
-
-// Retrieve original LLM command captured in tool_execution_start
 const llmCommand = pendingLlmCommands.get(event.toolCallId ?? "") ?? rtkCommand;
 pendingLlmCommands.delete(event.toolCallId ?? "");
-
 const rtkRewritten = rtkCommand !== llmCommand;
 ```
 
-After `applyBashIntercept` (where `result.routing` and `result.command` are available):
+After `applyBashIntercept` (where `result.routing` is available):
 
 ```ts
-// Emit in-flight bash-dispatch card to dashboard (no-op when no bridge connected)
-(ctx.ui as any).notify?.(llmCommand, {
+pi.events.emit("pi-dev-worktrees:bash-dispatch", {
   toolCallId: event.toolCallId,
-  method: "bash-dispatch",
-  props: {
-    llmCommand,
-    rtkRewritten,
-    rtkCommand: rtkRewritten ? rtkCommand : undefined,
-    routing: result.routing,
-    hasDevcontainer: state.devcontainer !== undefined,
-  } satisfies BashDispatchProps,
+  llmCommand,
+  rtkRewritten,
+  rtkCommand: rtkRewritten ? rtkCommand : undefined,
+  routing: result.routing,
+  hasDevcontainer: state.devcontainer !== undefined,
 });
 ```
 
-Cast to `any` because `ctx.ui.notify`'s TypeScript signature in the pi ExtensionAPI types does not yet reflect the bridge opts extension. At runtime the bridge patches the method with the extended signature.
-
-## BashDispatchProps type (local, not shared)
+## Payload type (local, not shared)
 
 ```ts
-// Defined inline in index.ts or imported from a local types file.
-// Mirrors BashDispatchProps in packages/pi-dev-worktrees-plugin.
-interface BashDispatchProps {
+interface BashDispatchPayload {
+  toolCallId: string;
   llmCommand: string;
   rtkRewritten: boolean;
   rtkCommand?: string;
@@ -72,33 +57,25 @@ interface BashDispatchProps {
 }
 ```
 
-No cross-repo shared type — each side defines its own interface and they are kept in sync by convention.
+## Why pi.events.emit
 
-## No tool_result changes
-
-The dashboard's suppression mechanism (`findActiveInteractiveToolResultIds`) auto-resolves the `interactiveUi` row when the tool status flips to complete. No explicit dismiss call needed from this side.
-
-## No-bridge safety
-
-`ctx.ui.notify` exists in both TUI and dashboard contexts. In TUI context the bridge does not patch it with the opts extension, so the opts object is ignored — the original notify runs with just `(message, level)` where level is undefined (harmless). In dashboard context the bridge patch accepts and forwards the opts.
+Bridge's flow-event wiring forwards all `pi.events.emit` calls as `event_forward` messages to the server → browser. Zero bridge changes needed. In TUI context (no bridge), the event is silently ignored.
 
 ## Tests: `tests/bash-dispatch-emit.test.ts`
 
-Test setup: mock `ctx.ui` with a `notify` spy. Exercise the `tool_call` handler directly with a pre-populated `pendingLlmCommands` entry.
+Mock `pi.events.emit`. Exercise `tool_call` handler with pre-populated `pendingLlmCommands`.
 
-### Cases to cover
-
-| Scenario | llmCommand | rtkCommand | routing | Expected props |
+| Scenario | llmCommand | rtkCommand | routing | Expected |
 |---|---|---|---|---|
-| RTK rewrite + container | `grep foo` | `rtk grep foo` | `container` | rtkRewritten=true, rtkCommand set |
-| RTK rewrite + host | `grep foo` | `rtk grep foo` | `host` | rtkRewritten=true, rtkCommand set |
-| No RTK + container | `ls -la` | `ls -la` | `container` | rtkRewritten=false, rtkCommand undefined |
+| RTK + container | `grep foo` | `rtk grep foo` | `container` | rtkRewritten=true, rtkCommand set |
+| RTK + host | `grep foo` | `rtk grep foo` | `host` | rtkRewritten=true, rtkCommand set |
+| No RTK + container | `ls -la` | `ls -la` | `container` | rtkRewritten=false, no rtkCommand |
 | No RTK + host | `ls -la` | `ls -la` | `host` | rtkRewritten=false |
-| HOST: prefix | `HOST:ls` | `HOST:ls` | `host` | rtkRewritten=false, routing=host |
-| Error routing | `ls` | `ls` | `error` | routing=error |
+| HOST: prefix | `HOST:ls` | `HOST:ls` | `host` | rtkRewritten=false |
+| Error | `ls` | `ls` | `error` | routing=error |
 
 ### Invariants
-- `notify` called with `method: "bash-dispatch"` and `toolCallId` matching `event.toolCallId`
+- Event name always `"pi-dev-worktrees:bash-dispatch"`
+- `toolCallId` matches `event.toolCallId`
 - `pendingLlmCommands` empty after handler returns
-- `notify` NOT called for non-bash tool names
-- `notify` NOT called when `event.toolCallId` is absent (defensive)
+- Emit NOT called for non-bash tools

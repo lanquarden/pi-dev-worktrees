@@ -734,14 +734,16 @@ export default function (pi: ExtensionAPI) {
     // all pi.events.emit calls as event_forward messages automatically.
     // The client event reducer catches "pi-dev-worktrees:bash-dispatch" and
     // patches the matching tool row with the dispatch data.
-    (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", {
+    const dispatchPayload = {
       toolCallId: event.toolCallId,
       llmCommand,
       rtkRewritten,
       rtkCommand: rtkRewritten ? rtkCommand : undefined,
       routing: result.routing,
+      containerId: result.containerId,
       hasDevcontainer: state.devcontainer !== undefined,
-    });
+    };
+    (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", dispatchPayload);
   });
 
   // ── tool_result: prefix output with routing context ─────────────────
@@ -756,6 +758,9 @@ export default function (pi: ExtensionAPI) {
     if (routing === "error") return; // error text is self-explanatory
 
     const prefix = routing === "container" ? "[container]\n" : "[host]\n";
+    // Only prefix [host] when a devcontainer is configured — without one,
+    // everything runs on host and the prefix is just noise.
+    if (routing === "host" && !state.devcontainer) return;
     const updated = event.content.map((block) => {
       if (block.type !== "text") return block;
       return { ...block, text: prefix + block.text };

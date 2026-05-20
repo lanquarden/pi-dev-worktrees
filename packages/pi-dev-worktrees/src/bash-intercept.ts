@@ -42,6 +42,8 @@ export type BashRouting = "container" | "host" | "error";
 export interface InterceptResult {
   command: string;
   routing: BashRouting;
+  /** Container ID when routing === "container" (short 12-char form) */
+  containerId?: string;
 }
 
 /**
@@ -211,6 +213,7 @@ export async function applyBashIntercept(
           ` -- sh -c '${innerEscaped}'`
         ),
         routing: "container",
+        containerId: containerId.slice(0, 12),
       };
     }
 
