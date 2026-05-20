@@ -64,12 +64,7 @@ import {
 // Module-level project root — resolved once in session_start
 let projectRoot = "";
 
-// Session context stored from session_start — holds the bridge-patched ctx.ui.
-// The bridge patches ctx.ui.notify in its own session_start handler, and that
-// patched version is the same object pi-dev-worktrees receives in session_start.
-// Handlers (tool_call etc.) receive their own ctx argument per-call which is
-// NOT the patched one, so we must use this stored reference for notify calls.
-let sessionCtx: any = null;
+
 
 // Per-repo config resolved at session_start
 let resolvedWorktreeRoot: string = ".pi/worktrees";
@@ -583,7 +578,7 @@ export default function (pi: ExtensionAPI) {
   // ── session_start ──────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     projectRoot = resolveProjectRoot();
-    sessionCtx = ctx; // store bridge-patched ctx for use in tool_call handlers
+
     const restored = loadState(ctx);
     Object.assign(state, restored);
 
@@ -744,10 +739,11 @@ export default function (pi: ExtensionAPI) {
     (event.input as { command: string }).command = result.command;
 
     // Emit in-flight bash-dispatch card to dashboard.
-    // Use sessionCtx (stored from session_start) rather than the per-call ctx:
-    // the bridge patches ctx.ui.notify in its own session_start handler, and
-    // per-event ctx objects are separate instances that don't carry that patch.
-    (sessionCtx?.ui as any)?.notify?.(llmCommand, {
+    // Emit via pi.events — the bridge listens for "dashboard:notify" and
+    // converts it into a prompt_request message. This works because
+    // pi.events is shared across all extensions (unlike ctx.ui which is per-extension).
+    (pi as any).events?.emit("dashboard:notify", {
+      message: llmCommand,
       toolCallId: event.toolCallId,
       method: "bash-dispatch",
       props: {
