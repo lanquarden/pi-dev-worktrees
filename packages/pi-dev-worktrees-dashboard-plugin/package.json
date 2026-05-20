@@ -14,6 +14,7 @@
     "access": "public"
   },
   "type": "module",
+  "sideEffects": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/BlackBeltTechnology/pi-worktrees",
@@ -43,6 +44,12 @@
         "component": "PiDevWorktreesBadge",
         "predicate": "hasPiDevWorktrees"
       }
+    ],
+    "toolRenderers": [
+      {
+        "toolName": "bash",
+        "component": "EnhancedBashToolRenderer"
+      }
     ]
   },
   "peerDependencies": {
@@ -50,6 +57,7 @@
     "react-dom": ">=18.0.0"
   },
   "dependencies": {
+    "@blackbelt-technology/dashboard-plugin-runtime": "file:../../../pi-agent-dashboard/packages/dashboard-plugin-runtime",
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.3"
   },
   "devDependencies": {
