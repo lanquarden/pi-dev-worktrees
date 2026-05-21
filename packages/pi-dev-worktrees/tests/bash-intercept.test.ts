@@ -78,6 +78,33 @@ describe("Rule 2 — git/gh/hub/find pass through unchanged", () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
+  it("passes compound export+cd+git through (RTK pattern)", async () => {
+    const cmd =
+      "export RTK_DB_PATH='/tmp/pi-rtk-optimizer/history.db'; cd /home/user/repo && rtk git commit -m 'feat: something'";
+    expect(await intercept(cmd, containerState)).toBe(cmd);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("passes rtk git (without preamble) through", async () => {
+    const cmd = "rtk git status";
+    expect(await intercept(cmd, containerState)).toBe(cmd);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("passes rtk gh through", async () => {
+    const cmd = "rtk gh pr list";
+    expect(await intercept(cmd, containerState)).toBe(cmd);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("passes export+cd+git with multiline -m through", async () => {
+    const cmd =
+      `export RTK_DB_PATH='/tmp/pi-rtk-optimizer/history.db'; ` +
+      `cd /home/user/repo && rtk git commit -m "feat: title\n- line 1\n- line 2"`;
+    expect(await intercept(cmd, containerState)).toBe(cmd);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
   it("passes gh commands through", async () => {
     expect(await intercept("gh pr list", containerState)).toBe("gh pr list");
   });
@@ -544,6 +571,25 @@ describe("Rule 4 — display comment shows original command in TUI", () => {
     const lines = result.split("\n");
     expect(lines[0]).toBe("# [container] uv lock --check");
     expect(lines[1]).toContain("devcontainer exec");
+  });
+
+  it("collapses newlines in display comment (multi-line commit message)", async () => {
+    startupOutcome.mockReturnValue({
+      outcome: "success",
+      containerId: "abc123",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+    const state: WorktreesState = {
+      devcontainer: { enabled: true, workspace: ROOT, starting: false },
+    };
+    const multilineCmd = `npm run build\n# comment line\necho done`;
+    const result = await intercept(multilineCmd, state);
+    const firstLine = result.split("\n")[0];
+    // The # comment must be a single line — no embedded newlines
+    expect(firstLine.startsWith("# [container]")).toBe(true);
+    expect(firstLine).not.toContain("\n");
+    // Newlines collapsed to spaces in the comment
+    expect(firstLine).toContain("npm run build # comment line echo done");
   });
 });
 
