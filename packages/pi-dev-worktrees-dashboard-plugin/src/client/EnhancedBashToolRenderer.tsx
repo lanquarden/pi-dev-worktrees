@@ -10,6 +10,10 @@ interface BashDispatchData {
   hasDevcontainer?: boolean;
 }
 
+function extractDispatchData(args?: Record<string, unknown>): BashDispatchData | undefined {
+  return (args as any)?._pluginData?.["pi-dev-worktrees:bash-dispatch"] as BashDispatchData | undefined;
+}
+
 function DispatchChips({ dispatch }: { dispatch: BashDispatchData }) {
   return (
     <span className="flex items-center gap-1.5 shrink-0">
@@ -40,6 +44,13 @@ function DispatchChips({ dispatch }: { dispatch: BashDispatchData }) {
   );
 }
 
+/** Header chips function for registerToolRenderer opts */
+export function renderBashDispatchChips(args?: Record<string, unknown>): React.ReactNode {
+  const dispatch = extractDispatchData(args);
+  if (!dispatch) return null;
+  return <DispatchChips dispatch={dispatch} />;
+}
+
 /** Detail line showing RTK rewrite or container exec target */
 function DispatchDetail({ dispatch }: { dispatch: BashDispatchData }) {
   if (!dispatch.rtkRewritten && dispatch.routing !== "container") return null;
@@ -68,7 +79,7 @@ function DispatchDetail({ dispatch }: { dispatch: BashDispatchData }) {
 }
 
 export function EnhancedBashToolRenderer(props: ToolRendererProps) {
-  const dispatch = (props.args as any)?._pluginData?.["pi-dev-worktrees:bash-dispatch"] as BashDispatchData | undefined;
+  const dispatch = extractDispatchData(props.args);
 
   return (
     <div className="space-y-1">

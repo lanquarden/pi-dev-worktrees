@@ -5,14 +5,16 @@
  *   - session-card-badge → PiDevWorktreesBadge  (predicate: hasPiDevWorktrees)
  *
  * Registers a custom tool renderer for "bash" that overlays dispatch chips
- * when _dispatch metadata is present on the tool args (patched in by event
+ * when _pluginData metadata is present on the tool args (patched in by event
  * reducer from pi-dev-worktrees:bash-dispatch events).
  */
 import { registerToolRenderer } from "@blackbelt-technology/dashboard-plugin-runtime";
-import { EnhancedBashToolRenderer } from "./EnhancedBashToolRenderer.js";
+import { EnhancedBashToolRenderer, renderBashDispatchChips } from "./EnhancedBashToolRenderer.js";
 
-registerToolRenderer("bash", EnhancedBashToolRenderer);
+registerToolRenderer("bash", EnhancedBashToolRenderer, {
+  headerChips: renderBashDispatchChips,
+});
 
 export { hasPiDevWorktrees } from "./predicates.js";
 export { PiDevWorktreesBadge } from "./PiDevWorktreesBadge.js";
-export { EnhancedBashToolRenderer } from "./EnhancedBashToolRenderer.js";
+export { EnhancedBashToolRenderer, renderBashDispatchChips } from "./EnhancedBashToolRenderer.js";

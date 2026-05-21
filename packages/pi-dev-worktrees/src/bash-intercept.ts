@@ -3,7 +3,9 @@
  *
  * Decision table (first match wins):
  * 1. HOST: prefix → strip prefix, pass through on host, routing="host"
- * 2. git/gh/hub/find commands → pass through on host unchanged, routing="host"
+ * 2. git/gh/find commands (bare or via rtk wrapper, including compound
+ *    commands with export/cd preamble) → pass through on host unchanged,
+ *    routing="host"
  * 3. devcontainer.enabled && starting → replace with "still starting" error
  * 4. devcontainer.enabled && !starting → probe, wrap with devcontainer exec, routing="container"
  * 5. worktree.path set → prepend cd <path> &&, routing="host"
@@ -127,6 +129,24 @@ function containerNotReadyMessage(
 }
 
 /**
+ * Strip common shell preamble (env-var exports, cd statements) to find the
+ * effective command for routing purposes.  Only used for Rule 2 detection;
+ * the original command is always executed unchanged on the host.
+ *
+ * Handles patterns like:
+ *   export RTK_DB_PATH='/tmp/...'; cd /path/to/repo && git commit ...
+ *   VAR=value git status
+ */
+function effectiveCommand(cmd: string): string {
+  let s = cmd.trim();
+  // Strip any number of leading `export VAR=value;` or `VAR=value;` lines
+  s = s.replace(/^(?:export\s+)?\w+=[^;\n]*;\s*/g, "");
+  // Strip a single leading `cd <path> && ` or `cd <path> ; ` block
+  s = s.replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "");
+  return s.trim();
+}
+
+/**
  * Apply bash intercept routing to a command.
  * Returns an InterceptResult with the (possibly modified) command and routing metadata.
  */
@@ -140,8 +160,16 @@ export async function applyBashIntercept(
     return { command: cmd.replace(/^HOST:/i, "").trimStart(), routing: "host" };
   }
 
-  // Rule 2: git/gh/hub/find — pass through unchanged (always run on host)
-  if (/^(git|gh|hub|find)(\s|$)/.test(cmd)) {
+  // Rule 2: git/gh/find — pass through unchanged (always run on host)
+  // Also handles:
+  //   - compound commands with shell preamble (export VAR=...; cd ... && git ...)
+  //   - rtk wrappers (rtk git, rtk gh) used by the RTK optimizer
+  const effective = effectiveCommand(cmd);
+  if (
+    /^(git|gh|find)(\s|$)/.test(cmd) ||
+    /^(git|gh|find)(\s|$)/.test(effective) ||
+    /^rtk\s+(git|gh)(\s|$)/.test(effective)
+  ) {
     return { command: cmd, routing: "host" };
   }
 
@@ -196,7 +224,13 @@ export async function applyBashIntercept(
     // Prepend a shell comment with the original command so the TUI header shows
     // something human-readable instead of the full devcontainer exec boilerplate.
     // The shell ignores comment lines; it has no effect on execution.
-    const displayComment = `# [container] ${cmd}\n`;
+    //
+    // IMPORTANT: collapse newlines to spaces — shell comments only cover a
+    // single line.  A multi-line commit message (e.g. `git commit -m "feat:\n-
+    // ..."`) would otherwise leak subsequent lines out of the comment,
+    // causing the inner shell to parse them as commands and fail with a
+    // syntax error.
+    const displayComment = `# [container] ${cmd.replace(/\n/g, " ")}\n`;
 
     // Prefer --container-id when available — it requires no --workspace-folder
     // or --override-config repetition (all context is baked into the running
