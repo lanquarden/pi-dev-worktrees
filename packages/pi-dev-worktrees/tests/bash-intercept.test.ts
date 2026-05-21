@@ -59,9 +59,9 @@ describe("Rule 1 — HOST: prefix strips prefix and passes through", () => {
   });
 });
 
-// ── Rule 2: git/gh/hub/find pass-through ─────────────────────────────────────
+// ── Rule 2: git/gh/find pass-through ─────────────────────────────────────────
 
-describe("Rule 2 — git/gh/hub/find pass through unchanged", () => {
+describe("Rule 2 — git/gh/find pass through unchanged", () => {
   const containerState: WorktreesState = {
     devcontainer: { enabled: true, workspace: ROOT, starting: false },
     worktree: { branch: "feature/x", path: "/project/.pi/worktrees/feature/x" },
@@ -110,7 +110,9 @@ describe("Rule 2 — git/gh/hub/find pass through unchanged", () => {
   });
 
   it("passes hub commands through", async () => {
-    expect(await intercept("hub pull-request", containerState)).toBe("hub pull-request");
+    // hub is no longer in the excluded list — should be wrapped in container
+    const result = await intercept("hub pull-request", containerState);
+    expect(result).toContain("devcontainer exec");
   });
 
   it("passes find commands through", async () => {
