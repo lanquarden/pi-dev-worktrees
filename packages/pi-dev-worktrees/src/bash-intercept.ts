@@ -3,7 +3,7 @@
  *
  * Decision table (first match wins):
  * 1. HOST: prefix → strip prefix, pass through on host, routing="host"
- * 2. git/gh/hub/find commands (bare or via rtk wrapper, including compound
+ * 2. git/gh/find commands (bare or via rtk wrapper, including compound
  *    commands with export/cd preamble) → pass through on host unchanged,
  *    routing="host"
  * 3. devcontainer.enabled && starting → replace with "still starting" error
@@ -160,14 +160,14 @@ export async function applyBashIntercept(
     return { command: cmd.replace(/^HOST:/i, "").trimStart(), routing: "host" };
   }
 
-  // Rule 2: git/gh/hub/find — pass through unchanged (always run on host)
+  // Rule 2: git/gh/find — pass through unchanged (always run on host)
   // Also handles:
   //   - compound commands with shell preamble (export VAR=...; cd ... && git ...)
   //   - rtk wrappers (rtk git, rtk gh) used by the RTK optimizer
   const effective = effectiveCommand(cmd);
   if (
-    /^(git|gh|hub|find)(\s|$)/.test(cmd) ||
-    /^(git|gh|hub|find)(\s|$)/.test(effective) ||
+    /^(git|gh|find)(\s|$)/.test(cmd) ||
+    /^(git|gh|find)(\s|$)/.test(effective) ||
     /^rtk\s+(git|gh)(\s|$)/.test(effective)
   ) {
     return { command: cmd, routing: "host" };
