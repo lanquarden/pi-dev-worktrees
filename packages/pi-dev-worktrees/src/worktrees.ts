@@ -237,6 +237,62 @@ export function createOrTargetWorktree(
 }
 
 // ──────────────────────────────────────────────
+// wtp list parsing
+// ──────────────────────────────────────────────
+
+/**
+ * Parse the output of `wtp list --quiet` into branch names.
+ *
+ * `wtp list --quiet` prints one entry per line:
+ *   - "@" for the main worktree (always first, skip it)
+ *   - bare branch name for each managed worktree (e.g. "feature/foo")
+ *
+ * Returns only the managed branch names ("@" and blank lines excluded).
+ */
+export function parseWtpListQuiet(output: string): string[] {
+  return output
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && l !== "@");
+}
+
+/**
+ * List worktrees managed by wtp for the given project.
+ *
+ * Runs `wtp list --quiet`, parses branch names, resolves each to an
+ * absolute path under worktreesRoot, and skips entries whose path does
+ * not exist on disk. Falls back to enumerateWorktreeDirs on wtp failure.
+ *
+ * @param projectRoot   - absolute path to the git repo root
+ * @param worktreesRoot - absolute path to the wtp base_dir
+ * @param exec          - execSync-compatible function (injectable for tests)
+ * @param pathExists    - existsSync-compatible function (injectable for tests)
+ */
+export function listWtpWorktrees(
+  projectRoot: string,
+  worktreesRoot: string,
+  exec: (cmd: string, opts: { cwd: string; encoding: "utf8" }) => string = (cmd, opts) =>
+    execSync(cmd, opts),
+  pathExists: (p: string) => boolean = existsSync,
+): Array<{ branch: string; path: string }> {
+  let raw: string;
+  try {
+    raw = exec("wtp list --quiet", { cwd: projectRoot, encoding: "utf8" }).trim();
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+
+  const results: Array<{ branch: string; path: string }> = [];
+  for (const branch of parseWtpListQuiet(raw)) {
+    const wtPath = join(worktreesRoot, branch);
+    if (!pathExists(wtPath)) continue;
+    results.push({ branch, path: wtPath });
+  }
+  return results;
+}
+
+// ──────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────
 

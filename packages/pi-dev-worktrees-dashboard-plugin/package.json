@@ -1,0 +1,73 @@
+{
+  "name": "@lanquarden/pi-dev-worktrees-dashboard-plugin",
+  "version": "0.1.0",
+  "description": "pi-agent-dashboard plugin for pi-dev-worktrees — session-card badge showing active worktree and devcontainer state",
+  "license": "MIT",
+  "keywords": [
+    "pi-dashboard-plugin",
+    "pi-dev-worktrees",
+    "git",
+    "worktrees",
+    "devcontainer"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlackBeltTechnology/pi-worktrees",
+    "directory": "packages/pi-dev-worktrees-dashboard-plugin"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/client/index.tsx",
+      "default": "./src/client/index.tsx"
+    },
+    "./client": {
+      "types": "./src/client/index.tsx",
+      "default": "./src/client/index.tsx"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "pi-dashboard-plugin": {
+    "id": "pi-dev-worktrees",
+    "displayName": "pi-dev-worktrees Workspace",
+    "priority": 100,
+    "client": "./src/client/index.tsx",
+    "claims": [
+      {
+        "slot": "session-card-badge",
+        "component": "PiDevWorktreesBadge",
+        "predicate": "hasPiDevWorktrees"
+      }
+    ],
+    "toolRenderers": [
+      {
+        "toolName": "bash",
+        "component": "EnhancedBashToolRenderer"
+      }
+    ]
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "dependencies": {
+    "@blackbelt-technology/dashboard-plugin-runtime": "file:../../../pi-agent-dashboard/packages/dashboard-plugin-runtime",
+    "@blackbelt-technology/pi-dashboard-shared": "^0.5.3"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vitest": "^2.1.9"
+  }
+}

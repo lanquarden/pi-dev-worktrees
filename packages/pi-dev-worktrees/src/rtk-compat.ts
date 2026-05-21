@@ -51,6 +51,7 @@ export function detectRtkConflicts(
 
     const isUnknownOverride =
       bashTool.sourceInfo.source !== "built-in" &&
+      !path.startsWith("<builtin") &&
       !path.includes("pi-dev-worktrees");
 
     if (isUnknownOverride) {

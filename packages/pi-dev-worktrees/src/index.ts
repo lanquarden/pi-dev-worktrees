@@ -31,6 +31,7 @@ import {
   addCommandHook,
   removeHook,
   formatHook,
+  listWtpWorktrees,
 } from "./worktrees.js";
 import type { WtpHook } from "./worktrees.js";
 import {
@@ -63,6 +64,8 @@ import {
 // Module-level project root — resolved once in session_start
 let projectRoot = "";
 
+
+
 // Per-repo config resolved at session_start
 let resolvedWorktreeRoot: string = ".pi/worktrees";
 let resolvedPostCreateHooks: WtpHook[] = [];
@@ -70,6 +73,10 @@ let resolvedPostCreateHooks: WtpHook[] = [];
 // Last bash routing decision — read by the tool_result hook to prefix output.
 // Reset to null before each tool_call so unrelated tool results don't inherit it.
 let lastBashRouting: BashRouting | null = null;
+
+// Keyed by toolCallId. Stores original LLM command (pre-RTK) captured in
+// tool_execution_start. Deleted after consuming in tool_call.
+const pendingLlmCommands = new Map<string, string>();
 
 // Whether rtk is available in the active devcontainer.
 // In-memory only — re-evaluated at each container-ready transition.
@@ -332,14 +339,7 @@ function workspacesSnapshot(): string {
 
   if (existsSync(worktreesRoot)) {
     try {
-      const wtList = execSync("wtp list --quiet", { cwd: projectRoot, encoding: "utf8" }).trim();
-      if (wtList) {
-        for (const line of wtList.split("\n")) {
-          const wtPath = line.trim();
-          if (!wtPath || !wtPath.startsWith(worktreesRoot)) continue;
-          worktreeEntries.push({ branch: relative(worktreesRoot, wtPath), path: wtPath });
-        }
-      }
+      worktreeEntries = listWtpWorktrees(projectRoot, worktreesRoot);
     } catch {
       worktreeEntries = enumerateWorktreeDirs(worktreesRoot, worktreesRoot);
     }
@@ -570,6 +570,7 @@ export default function (pi: ExtensionAPI) {
   // ── session_start ──────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     projectRoot = resolveProjectRoot();
+
     const restored = loadState(ctx);
     Object.assign(state, restored);
 
@@ -625,6 +626,14 @@ export default function (pi: ExtensionAPI) {
     return {
       message: { customType: "pi-dev-worktrees:context", content: lines.join("\n"), display: false },
     };
+  });
+
+  // ── tool_execution_start: capture original LLM command (pre-RTK) ────────
+  pi.on("tool_execution_start", (event) => {
+    if (event.toolName !== "bash") return;
+    if (event.toolCallId) {
+      pendingLlmCommands.set(event.toolCallId, (event.args as { command?: string })?.command ?? "");
+    }
   });
 
   // ── tool_call bash interception ────────────
@@ -707,11 +716,34 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    const cmd = (event.input as { command: string }).command;
+    // Capture post-RTK command at handler entry (RTK already ran before this handler)
+    const rtkCommand = (event.input as { command: string }).command;
+
+    // Retrieve original LLM command captured in tool_execution_start
+    const llmCommand = pendingLlmCommands.get(event.toolCallId ?? "") ?? rtkCommand;
+    pendingLlmCommands.delete(event.toolCallId ?? "");
+
+    const rtkRewritten = rtkCommand !== llmCommand;
+
     lastBashRouting = null; // reset before each call
-    const result = await applyBashIntercept(cmd, state, projectRoot);
+    const result = await applyBashIntercept(rtkCommand, state, projectRoot);
     lastBashRouting = result.routing;
     (event.input as { command: string }).command = result.command;
+
+    // Emit dispatch metadata via pi event bus. The dashboard bridge forwards
+    // all pi.events.emit calls as event_forward messages automatically.
+    // The client event reducer catches "pi-dev-worktrees:bash-dispatch" and
+    // patches the matching tool row with the dispatch data.
+    const dispatchPayload = {
+      toolCallId: event.toolCallId,
+      llmCommand,
+      rtkRewritten,
+      rtkCommand: rtkRewritten ? rtkCommand : undefined,
+      routing: result.routing,
+      containerId: result.containerId,
+      hasDevcontainer: state.devcontainer !== undefined,
+    };
+    (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", dispatchPayload);
   });
 
   // ── tool_result: prefix output with routing context ─────────────────
@@ -726,6 +758,9 @@ export default function (pi: ExtensionAPI) {
     if (routing === "error") return; // error text is self-explanatory
 
     const prefix = routing === "container" ? "[container]\n" : "[host]\n";
+    // Only prefix [host] when a devcontainer is configured — without one,
+    // everything runs on host and the prefix is just noise.
+    if (routing === "host" && !state.devcontainer) return;
     const updated = event.content.map((block) => {
       if (block.type !== "text") return block;
       return { ...block, text: prefix + block.text };

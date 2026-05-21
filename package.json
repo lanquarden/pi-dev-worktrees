@@ -1,20 +1,9 @@
 {
-  "name": "pi-dev-worktrees",
+  "name": "pi-dev-worktrees-workspace",
   "private": true,
   "type": "module",
+  "workspaces": ["packages/*"],
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "js-yaml": "^4.1.0"
-  },
-  "devDependencies": {
-    "@blackbelt-technology/pi-dashboard-shared": "*",
-    "vitest": "^2.1.9"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "test": "npm test --workspaces"
   }
 }

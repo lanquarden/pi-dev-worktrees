@@ -14,6 +14,7 @@ import {
   addCommandHook,
   removeHook,
   formatHook,
+  listWtpWorktrees,
 } from "../src/worktrees.js";
 import type { WtpConfig, WtpHook } from "../src/worktrees.js";
 
@@ -273,3 +274,94 @@ describe("writeWtpYml / readWtpYml round-trip", () => {
     expect(listHooks(read!)).toEqual([]);
   });
 });
+
+// ── listWtpWorktrees ───────────────────────────────────────────────────────────────────────────────
+
+describe("listWtpWorktrees", () => {
+  // Real output captured from `wtp list --quiet` in cicd-gha-template-seed
+  // (3 managed worktrees: add-codeowners, add-openspec, fix-agent-session).
+  const SAMPLE_OUTPUT = "@\nadd-codeowners\nadd-openspec\nfix-agent-session";
+  const ROOT = "/repo";
+  const WT_ROOT = "/repo/.pi/worktrees";
+
+  function execReturning(output: string) {
+    return (_cmd: string, _opts: { cwd: string; encoding: "utf8" }) => output;
+  }
+
+  function execThrowing() {
+    return (_cmd: string, _opts: { cwd: string; encoding: "utf8" }): string => {
+      throw new Error("wtp not found");
+    };
+  }
+
+  it("returns all three branches from the real cicd-gha-template-seed sample", () => {
+    const pathExists = (p: string) =>
+      ["add-codeowners", "add-openspec", "fix-agent-session"].some((b) =>
+        p === `${WT_ROOT}/${b}`,
+      );
+
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execReturning(SAMPLE_OUTPUT), pathExists);
+
+    expect(result).toEqual([
+      { branch: "add-codeowners",    path: `${WT_ROOT}/add-codeowners` },
+      { branch: "add-openspec",      path: `${WT_ROOT}/add-openspec` },
+      { branch: "fix-agent-session", path: `${WT_ROOT}/fix-agent-session` },
+    ]);
+  });
+
+  it("skips branches whose path does not exist on disk", () => {
+    const pathExists = (p: string) => !p.includes("add-openspec");
+
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execReturning(SAMPLE_OUTPUT), pathExists);
+
+    expect(result.map((e) => e.branch)).toEqual(["add-codeowners", "fix-agent-session"]);
+  });
+
+  it("returns empty array when wtp outputs only the @ marker", () => {
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execReturning("@"), () => true);
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty array when wtp outputs empty string", () => {
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execReturning(""), () => true);
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty array when wtp throws (not installed)", () => {
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execThrowing(), () => true);
+    expect(result).toEqual([]);
+  });
+
+  it("resolves nested branch names (feature/foo) to correct paths", () => {
+    const output = "@\nfeature/auth\nfix/typo";
+    const pathExists = (p: string) => p.includes("feature/auth") || p.includes("fix/typo");
+
+    const result = listWtpWorktrees(ROOT, WT_ROOT, execReturning(output), pathExists);
+
+    expect(result).toEqual([
+      { branch: "feature/auth", path: `${WT_ROOT}/feature/auth` },
+      { branch: "fix/typo",     path: `${WT_ROOT}/fix/typo` },
+    ]);
+  });
+
+  it("passes projectRoot as cwd to exec", () => {
+    let capturedCwd = "";
+    const exec = (_cmd: string, opts: { cwd: string; encoding: "utf8" }) => {
+      capturedCwd = opts.cwd;
+      return SAMPLE_OUTPUT;
+    };
+    listWtpWorktrees("/my/project", WT_ROOT, exec, () => true);
+    expect(capturedCwd).toBe("/my/project");
+  });
+
+  it("calls wtp list --quiet", () => {
+    let capturedCmd = "";
+    const exec = (cmd: string, _opts: { cwd: string; encoding: "utf8" }) => {
+      capturedCmd = cmd;
+      return "@";
+    };
+    listWtpWorktrees(ROOT, WT_ROOT, exec, () => false);
+    expect(capturedCmd).toBe("wtp list --quiet");
+  });
+});
+
