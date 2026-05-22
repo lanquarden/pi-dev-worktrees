@@ -1,3 +1,4 @@
+
 # pi-dev-worktrees
 
 A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provides isolated branch workspaces using git worktrees (`wtp`) and optional devcontainer targeting.
@@ -16,9 +17,47 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provide
 - [`wtp`](https://github.com/nicholasgasior/wtp) v2+ (for worktree features)
 - `devcontainer` CLI (for container features)
 
-## Companion extensions
+## Installation
 
-[`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) is the recommended companion extension for token compression. It rewrites bash commands to pipe output through `rtk compress`, significantly reducing context consumption.
+### pi extension
+
+Install the worktree extension with `pi install`:
+
+```bash
+pi install npm:@lanquarden/pi-dev-worktrees
+```
+
+For a manual global install, copy or symlink this package into the global pi extensions directory:
+
+```bash
+cp -r packages/pi-dev-worktrees ~/.pi/agent/extensions/pi-dev-worktrees
+cd ~/.pi/agent/extensions/pi-dev-worktrees
+npm install
+```
+
+For project-local use, copy or symlink it into the project extensions directory:
+
+```bash
+cp -r packages/pi-dev-worktrees /your/project/.pi/extensions/pi-dev-worktrees
+```
+
+### pi-agent-dashboard plugin
+
+The dashboard plugin is optional. Install it only when you want pi-agent-dashboard to show the active worktree and devcontainer state in the session card.
+
+Install the dashboard plugin package wherever your pi-agent-dashboard installation loads dashboard plugins:
+
+```bash
+npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
+```
+
+The plugin package lives in `packages/pi-dev-worktrees-dashboard-plugin` and declares a `pi-dashboard-plugin` manifest with the `session-card-badge` and enhanced `bash` tool renderer contributions.
+
+## Optional companion: pi-rtk-optimizer
+
+[`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) is optional. Use it only if you want token compression for bash output. It rewrites bash commands to pipe output through [`rtk compress`](https://github.com/MasuRii/rtk), significantly reducing context consumption.
+
+`pi-dev-worktrees` works without `pi-rtk-optimizer`. The setup below is needed only when both extensions are installed and devcontainer routing is active.
 
 ### Why `pi install` is wrong
 
@@ -78,22 +117,6 @@ Or, if the container does not have the host `rtk` on its path at build time, ins
 ## Incompatible extensions
 
 - **`@sherif-fanous/pi-rtk`** — uses a `spawnHook`-based bash tool replacement. `spawnHook` fires *after* all `tool_call` handlers, so it receives the fully-wrapped `devcontainer exec ... -- sh -c '...'` string instead of the inner command. This breaks container routing silently. Do not load alongside `pi-dev-worktrees`.
-
-## Installation
-
-Copy to (or symlink from) your global pi extensions directory:
-
-```bash
-cp -r . ~/.pi/agent/extensions/pi-dev-worktrees
-cd ~/.pi/agent/extensions/pi-dev-worktrees
-npm install
-```
-
-Or for project-local use:
-
-```bash
-cp -r . /your/project/.pi/extensions/pi-dev-worktrees
-```
 
 ## How it works
 
