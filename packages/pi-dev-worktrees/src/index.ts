@@ -381,7 +381,7 @@ function workspacesSnapshot(): string {
 // Worktree remove helper (shared by command + tool)
 // ──────────────────────────────────────────────
 
-function doWorktreeRemove(branch: string): ActionResult {
+function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
   if (!projectRoot) return { ok: false, message: "Not in a git repository" };
   if (!isWtpAvailable()) return { ok: false, message: "wtp not found. Install wtp to use worktree features." };
 
@@ -892,7 +892,7 @@ export default function (pi: ExtensionAPI) {
           break;
         }
         case "remove": {
-          result = doWorktreeRemove(branch!);
+          result = doWorktreeRemove(branch!, pi);
           if (result.ok) (pi as any).ui?.setStatus?.("pi-dev-worktrees", buildStatusString(state));
           break;
         }
@@ -1019,7 +1019,7 @@ export default function (pi: ExtensionAPI) {
           "Any uncommitted changes in this worktree will be lost.",
         );
         if (!confirmed) { ctx.ui.notify("Cancelled", "info"); return; }
-        const r = doWorktreeRemove(branch);
+        const r = doWorktreeRemove(branch, pi);
         ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
