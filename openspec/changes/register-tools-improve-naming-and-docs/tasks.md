@@ -10,7 +10,7 @@
 
 - [x] 2.1 Register `worktree` tool via `pi.registerTool()` using a TypeBox discriminated union: `{ action: "set", branch: string }` | `{ action: "remove", branch: string }` | `{ action: "off" | "prune" | "status" }` — `branch` is required for `set` and `remove`, not present for the rest; delegate to shared helpers
 - [x] 2.2 Register `devcontainer` tool via `pi.registerTool()` with `action: StringEnum(["on","off","rebuild","logs"])`, delegating to `doDevcontainerAction`
-- [ ] 2.3 Verify both tools are callable in a single LLM turn alongside `bash` (manual test: single prompt that chains worktree set + devcontainer on + bash)
+- [x] 2.3 Verify both tools are callable in a single LLM turn alongside `bash` (manual test: single prompt that chains worktree set + devcontainer on + bash)
 
 ## 3. Extend /worktree with status and remove sub-commands
 
@@ -28,7 +28,7 @@
 ## 5. Update dashboard modal command reference
 
 - [x] 5.1 Change `command: "/workspaces"` → `command: "/worktree status"` in the dashboard UI module (likely `dashboard-ui.ts`)
-- [ ] 5.2 Verify the modal still opens correctly via the dashboard after the change
+- [x] 5.2 Verify the modal still opens correctly via the dashboard after the change
 
 ## 6. Update documentation
 
