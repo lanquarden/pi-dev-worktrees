@@ -1,7 +1,7 @@
 
 # pi-dev-worktrees
 
-A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provides isolated branch workspaces using git worktrees ([wtp](https://github.com/nicholasgasior/wtp)) and optional devcontainer targeting.
+A [pi](https://github.com/earendil-works/pi-coding-agent) extension that provides isolated branch workspaces using [git](https://git-scm.com/) worktrees ([wtp](https://github.com/nicholasgasior/wtp)) and optional [devcontainer](https://github.com/devcontainers/cli) targeting.
 
 ## Installation
 
@@ -38,9 +38,9 @@ npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
 
 ### Requirements
 
-- `git`
+- [`git`](https://git-scm.com/)
 - [`wtp`](https://github.com/nicholasgasior/wtp) v2+ (for worktree features)
-- `devcontainer` CLI (for container features)
+- [`devcontainer`](https://github.com/devcontainers/cli) CLI (for container features)
 
 ### Features
 
@@ -52,17 +52,9 @@ npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
 - **`/worktree init`** — interactively create `.wtp.yml`
 - **`/worktree hooks [show | add <cmd> | remove <n> | clear]`** — manage post-create hooks in `.wtp.yml`
 - **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; `rebuild` forces `--no-cache`
-- **Tools** (`worktree`, `devcontainer`) — same operations callable by the LLM or pi-dashboard in a single turn
-
-### LLM Tools
-
-Two registered tools allow the LLM to chain setup and task work autonomously:
-
-**`worktree`** — `action`: `"set"` (branch required) | `"remove"` (branch required) | `"off"` | `"prune"` | `"status"`
-
-**`devcontainer`** — `action`: `"on"` | `"off"` | `"rebuild"` | `"logs"`
-
-From the pi-dashboard, use these tools instead of slash commands — slash commands require the pi TUI.
+- **LLM tools** (`worktree`, `devcontainer`) — same operations callable by the LLM as tools in a single turn:
+  - `worktree` — `action`: `"set"` (branch required) | `"remove"` (branch required) | `"off"` | `"prune"` | `"status"`
+  - `devcontainer` — `action`: `"on"` | `"off"` | `"rebuild"` | `"logs"`
 
 ### Per-repo Config
 
@@ -72,7 +64,7 @@ Create `~/.pi/agent/pi-dev-worktrees.config.json` to configure `base_dir` and po
 {
   "repos": [
     {
-      "repoGlob": "github.com/myorg/*",
+      "repoGlob": "github.com/myorg/my-repo",
       "worktreeRoot": "/fast-ssd/worktrees",
       "postCreateHooks": [
         { "type": "command", "command": "mise install" },
@@ -85,7 +77,7 @@ Create `~/.pi/agent/pi-dev-worktrees.config.json` to configure `base_dir` and po
 ```
 
 **Schema:**
-- `repoGlob` — matched against the `origin` remote URL. `*` matches any sequence including `/`.
+- `repoGlob` — matched against the `origin` remote URL. `*` matches any sequence including `/`. First match wins.
 - `worktreeRoot` — path used as `base_dir` in `.wtp.yml`. Relative paths resolved from project root.
 - `postCreateHooks` *(optional)* — extra hooks appended when `ensureWtpYml` generates `.wtp.yml`.
 
@@ -131,7 +123,7 @@ Interactive `!<cmd>` commands follow the same routing as LLM-initiated bash call
 
 #### git/gh Passthrough
 
-`git`, `gh`, `hub`, and `find` commands always run on the host regardless of routing state.
+`git`, `gh`, and `find` commands always run on the host regardless of routing state.
 
 ### State Persistence
 
@@ -161,14 +153,14 @@ The plugin package lives in `packages/pi-dev-worktrees-dashboard-plugin` and con
 
 ### Setup (only needed when both are installed)
 
-`pi-rtk-optimizer` must load *before* `pi-dev-worktrees` so it rewrites commands before the devcontainer wrapping. Use `settings.json` `extensions` array — not `pi install`:
+`pi-rtk-optimizer` must load *before* `pi-dev-worktrees` so it rewrites commands before the devcontainer wrapping. Use the `settings.json` `extensions` array — not `pi install`:
 
 ```json
 // .pi/settings.json  (project-level, or ~/.pi/agent/settings.json globally)
 {
   "extensions": [
-    "/path/to/pi-rtk-optimizer",
-    "/path/to/pi-dev-worktrees"
+    "npm:pi-rtk-optimizer",
+    "npm:@lanquarden/pi-dev-worktrees"
   ]
 }
 ```
