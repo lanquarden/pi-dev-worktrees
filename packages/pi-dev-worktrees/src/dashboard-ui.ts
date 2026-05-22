@@ -6,7 +6,7 @@
  * 1. `footer-segment` decorator — live chip in the session card header showing
  *    the active worktree branch and/or devcontainer state.
  *
- * 2. `management-modal` for `/workspaces` — table of all worktrees under
+ * 2. `management-modal` for `/worktree status` — table of all worktrees under
  *    `.pi/worktrees/` with a per-row Remove action.
  *
  * Both are driven by the synchronous `ui:list-modules` probe emitted by the
@@ -33,7 +33,7 @@ import { saveState } from "./session.js";
 const NAMESPACE = "pi-dev-worktrees";
 const FOOTER_ID = "workspace-state";
 const MODAL_ID = "worktrees-table";
-const MODAL_COMMAND = "/workspaces";
+const MODAL_COMMAND = "/worktree status";
 const EXEC_TIMEOUT = 3000;
 const BRANCH_MAX_LEN = 20;
 
