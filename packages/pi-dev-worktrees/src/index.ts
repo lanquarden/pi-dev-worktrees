@@ -587,7 +587,17 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
-      if (generated) ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
+      if (generated) {
+        ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
+      } else {
+        // .wtp.yml already exists — read its base_dir as the authoritative
+        // worktree root. This takes precedence over plugin config defaults
+        // since the user (or wtp setup) explicitly configured it.
+        const existingConfig = readWtpYml(projectRoot);
+        if (existingConfig?.defaults?.base_dir) {
+          resolvedWorktreeRoot = existingConfig.defaults.base_dir;
+        }
+      }
     } catch { /* non-fatal */ }
 
     ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
