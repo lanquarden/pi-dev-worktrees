@@ -158,7 +158,7 @@ The plugin package lives in `packages/pi-dev-worktrees-dashboard-plugin` and con
 ```json
 // .pi/settings.json  (project-level, or ~/.pi/agent/settings.json globally)
 {
-  "extensions": [
+  "packages": [
     "npm:pi-rtk-optimizer",
     "npm:@lanquarden/pi-dev-worktrees"
   ]
