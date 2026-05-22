@@ -31,7 +31,7 @@ function DispatchChips({ dispatch }: { dispatch: BashDispatchData }) {
         </span>
       )}
       {dispatch.routing === "host" && dispatch.hasDevcontainer && (
-        <span className="inline-flex items-center px-1.5 py-[1px] rounded text-[10px] font-sans bg-[var(--bg-quaternary)] text-[var(--text-secondary)]">
+        <span className="inline-flex items-center px-1.5 py-[1px] rounded text-[10px] font-sans bg-blue-400/15 text-blue-400">
           HOST
         </span>
       )}
