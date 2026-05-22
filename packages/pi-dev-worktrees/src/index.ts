@@ -14,6 +14,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type, StringEnum } from "@earendil-works/pi-ai";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
 import { state, loadState, saveState } from "./session.js";
@@ -374,6 +375,45 @@ function workspacesSnapshot(): string {
   lines.push("");
   lines.push(`Current session: worktree=${state.worktree?.branch ?? "off"}  devcontainer=${state.devcontainer?.enabled ? "on" : "off"}`);
   return lines.join("\n");
+}
+
+// ──────────────────────────────────────────────
+// Worktree remove helper (shared by command + tool)
+// ──────────────────────────────────────────────
+
+function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
+  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!isWtpAvailable()) return { ok: false, message: "wtp not found. Install wtp to use worktree features." };
+
+  const resolvedRoot = resolve(projectRoot, resolvedWorktreeRoot);
+  const worktreePath = join(resolvedRoot, branch);
+
+  let dirty = false;
+  try {
+    dirty = execSync("git status --porcelain", { cwd: worktreePath, encoding: "utf8", timeout: 3000 }).trim().length > 0;
+  } catch { /* non-existent path — wtp remove will handle the error */ }
+
+  try {
+    execSync(`wtp remove ${dirty ? "--force " : ""}${shellEscapeArg(branch)}`, {
+      cwd: projectRoot, encoding: "utf8",
+    });
+  } catch (err) {
+    return { ok: false, message: `Failed to remove worktree '${branch}': ${String(err)}` };
+  }
+
+  emitWorkspaceRemoved(pi, branch, worktreePath, projectRoot);
+
+  if (state.worktree?.branch === branch) {
+    state.worktree = undefined;
+    saveState(pi, state);
+    emitStateUpdate(pi, state);
+  }
+
+  try {
+    execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" });
+  } catch { /* best-effort */ }
+
+  return { ok: true, message: `Removed worktree '${branch}'` };
 }
 
 // ──────────────────────────────────────────────
@@ -798,10 +838,113 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
+  // ── Tools (LLM-callable) ────────────────────────────────────────
+
+  pi.registerTool({
+    name: "worktree",
+    label: "Worktree",
+    description: "Manage git worktrees. Use action='set' to create/switch branch (branch required), 'remove' to delete (branch required), 'off' to deactivate, 'prune' to clear stale metadata, 'status' to list active worktrees.",
+    promptSnippet: "Create/switch/remove worktrees and check worktree status",
+    parameters: Type.Object({
+      action: StringEnum(["set", "off", "prune", "status", "remove"] as const, {
+        description: "Operation: 'set' or 'remove' require branch; 'off', 'prune', 'status' do not",
+      }),
+      branch: Type.Optional(Type.String({ description: "Branch name — required for 'set' and 'remove'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const { action, branch } = params;
+
+      // Runtime enforcement: branch required for set/remove
+      if ((action === "set" || action === "remove") && !branch) {
+        return {
+          content: [{ type: "text", text: `Error: 'branch' is required when action is '${action}'` }],
+          details: { ok: false },
+        };
+      }
+
+      let result: ActionResult;
+
+      switch (action) {
+        case "set": {
+          result = worktreeSet(branch!, pi);
+          if (result.ok) (pi as any).ui?.setStatus?.("pi-dev-worktrees", buildStatusString(state));
+          break;
+        }
+        case "off": {
+          result = worktreeOff(pi);
+          break;
+        }
+        case "prune": {
+          if (!projectRoot) {
+            result = { ok: false, message: "Not in a git repository" };
+          } else {
+            try {
+              const output = execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" }).trim();
+              result = { ok: true, message: output || "No stale worktree metadata found." };
+            } catch (e) {
+              result = { ok: false, message: "git worktree prune failed: " + (e instanceof Error ? e.message : String(e)) };
+            }
+          }
+          break;
+        }
+        case "status": {
+          result = { ok: true, message: workspacesSnapshot() };
+          break;
+        }
+        case "remove": {
+          result = doWorktreeRemove(branch!, pi);
+          if (result.ok) (pi as any).ui?.setStatus?.("pi-dev-worktrees", buildStatusString(state));
+          break;
+        }
+      }
+
+      return {
+        content: [{ type: "text", text: result!.message + (result!.hookOutput ? "\n" + result!.hookOutput : "") }],
+        details: { ok: result!.ok },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "devcontainer",
+    label: "Devcontainer",
+    description: "Manage devcontainer targeting. Use action='on' to start, 'off' to stop, 'rebuild' to force full image rebuild, 'logs' to tail startup output.",
+    promptSnippet: "Start, stop, rebuild or check logs for the devcontainer",
+    parameters: Type.Object({
+      action: StringEnum(["on", "off", "rebuild", "logs"] as const, {
+        description: "Operation to perform on the devcontainer",
+      }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const { action } = params;
+      let result: ActionResult;
+
+      switch (action) {
+        case "on":      result = devcontainerOn(pi); break;
+        case "off":     result = devcontainerOff(pi); break;
+        case "rebuild": result = devcontainerRebuild(pi); break;
+        case "logs": {
+          if (!projectRoot) {
+            result = { ok: false, message: "Not in a git repository" };
+          } else {
+            const logTail = tailContainerLog(projectRoot, 50);
+            result = { ok: true, message: logTail || `No startup log found. Expected at: ${containerLogPath(projectRoot)}` };
+          }
+          break;
+        }
+      }
+
+      return {
+        content: [{ type: "text", text: result!.message }],
+        details: { ok: result!.ok },
+      };
+    },
+  });
+
   // ── Commands (TUI + dashboard via useRpcKeeper) ───────────────────────
 
   pi.registerCommand("worktree", {
-    description: "Manage git worktrees. Usage: /worktree [branch | off]",
+    description: "Manage git worktrees. Usage: /worktree [set] <branch> | off | prune | status | remove <branch> | init | hooks ...",
     handler: async (args, ctx) => {
       const arg = args?.trim();
       if (!arg) {
@@ -858,6 +1001,31 @@ export default function (pi: ExtensionAPI) {
         }
         return;
       }
+      if (arg === "status") {
+        ctx.ui.notify(workspacesSnapshot(), "info");
+        return;
+      }
+      if (arg === "remove") {
+        ctx.ui.notify("Usage: /worktree remove <branch>", "info");
+        return;
+      }
+      if (arg.startsWith("remove ")) {
+        const branch = arg.slice("remove ".length).trim();
+        if (!branch) { ctx.ui.notify("Usage: /worktree remove <branch>", "info"); return; }
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        if (!isWtpAvailable()) { ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning"); return; }
+        const confirmed = await ctx.ui.confirm(
+          `Remove worktree '${branch}'?`,
+          "Any uncommitted changes in this worktree will be lost.",
+        );
+        if (!confirmed) { ctx.ui.notify("Cancelled", "info"); return; }
+        const r = doWorktreeRemove(branch, pi);
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+        ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+        return;
+      }
+      // Strip optional 'set ' prefix — /worktree set feature/auth == /worktree feature/auth
+      const branch = arg.startsWith("set ") ? arg.slice("set ".length).trim() : arg;
       if (!isWtpAvailable()) {
         ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning");
         return;
@@ -869,7 +1037,7 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         ctx.ui.notify(`Failed to write .wtp.yml: ${String(err)}`, "warning");
       }
-      const r = worktreeSet(arg, pi);
+      const r = worktreeSet(branch, pi);
       ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
       ctx.ui.notify(r.message, r.ok ? "info" : "warning");
       if (r.ok && r.hookOutput) {
@@ -919,90 +1087,5 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("workspaces", {
-    description: "Show all worktrees and devcontainer status",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(workspacesSnapshot(), "info");
-    },
-  });
-
-  pi.registerCommand("workspace-cleanup", {
-    description: "Interactively remove stale worktrees",
-    handler: async (_args, ctx) => {
-      if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-      if (!isWtpAvailable()) { ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning"); return; }
-
-      const worktreesRoot = resolve(projectRoot, resolvedWorktreeRoot);
-      if (!existsSync(worktreesRoot)) { ctx.ui.notify(`No worktrees directory found (${resolvedWorktreeRoot}/)`, "info"); return; }
-
-      const entries = enumerateWorktreeDirs(worktreesRoot, worktreesRoot);
-      if (entries.length === 0) { ctx.ui.notify("No worktrees found", "info"); return; }
-
-      const now = Date.now();
-      const STALE_MS = 7 * 24 * 60 * 60 * 1000;
-
-      const candidates = entries.map((entry) => {
-        let mtime = now;
-        let dirty = false;
-        let ageStr = "unknown age";
-        try {
-          const st = statSync(entry.path);
-          mtime = st.mtimeMs;
-          const ageDays = Math.floor((now - mtime) / (24 * 60 * 60 * 1000));
-          ageStr = ageDays === 0 ? "today" : `${ageDays}d ago`;
-        } catch { /* ignore */ }
-        try {
-          dirty = execSync("git status --porcelain", { cwd: entry.path, encoding: "utf8", timeout: 3000 }).trim().length > 0;
-        } catch { /* ignore */ }
-        const isStale = now - mtime > STALE_MS;
-        const label = `${entry.branch}  (${ageStr}${dirty ? ", dirty" : ""}${isStale ? " [STALE]" : ""})`;
-        return { ...entry, dirty, isStale, label };
-      });
-
-      let removedCount = 0;
-      const removedBranches: string[] = [];
-
-      for (const candidate of candidates) {
-        const shouldRemove = await ctx.ui.confirm(
-          `Remove worktree: ${candidate.branch}?`,
-          `${candidate.label}${candidate.dirty ? "\n⚠ Has uncommitted changes" : ""}`,
-        );
-        if (!shouldRemove) continue;
-
-        if (candidate.dirty) {
-          const confirmed = await ctx.ui.confirm(
-            `${candidate.branch} has uncommitted changes. Force remove?`,
-            "This will discard any uncommitted changes in the worktree.",
-          );
-          if (!confirmed) { ctx.ui.notify(`Skipped ${candidate.branch}`, "info"); continue; }
-        }
-
-        try {
-          execSync(`wtp remove ${candidate.dirty ? "--force " : ""}${shellEscapeArg(candidate.branch)}`, {
-            cwd: projectRoot, encoding: "utf8",
-          });
-          emitWorkspaceRemoved(pi, candidate.branch, candidate.path, projectRoot);
-          removedBranches.push(candidate.branch);
-          removedCount++;
-        } catch (err) {
-          ctx.ui.notify(`Failed to remove ${candidate.branch}: ${String(err)}`, "warning");
-        }
-      }
-
-      if (state.worktree && removedBranches.includes(state.worktree.branch)) {
-        state.worktree = undefined;
-        saveState(pi, state);
-        emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-      }
-
-      ctx.ui.notify(`Removed ${removedCount} worktree(s)`, "info");
-
-      try {
-        execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" });
-      } catch (e) {
-        ctx.ui.notify("git worktree prune failed: " + (e instanceof Error ? e.message : String(e)), "warning");
-      }
-    },
-  });
 }
+
