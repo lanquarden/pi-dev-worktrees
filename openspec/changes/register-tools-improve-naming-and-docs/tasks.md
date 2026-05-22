@@ -8,7 +8,7 @@
 
 ## 2. Register LLM-callable tools
 
-- [ ] 2.1 Register `worktree` tool via `pi.registerTool()` with `action: StringEnum(["set","off","prune","status","remove"])` and `branch: Type.Optional(Type.String())`, delegating to the shared helpers
+- [ ] 2.1 Register `worktree` tool via `pi.registerTool()` using a TypeBox discriminated union: `{ action: "set", branch: string }` | `{ action: "remove", branch: string }` | `{ action: "off" | "prune" | "status" }` — `branch` is required for `set` and `remove`, not present for the rest; delegate to shared helpers
 - [ ] 2.2 Register `devcontainer` tool via `pi.registerTool()` with `action: StringEnum(["on","off","rebuild","logs"])`, delegating to `doDevcontainerAction`
 - [ ] 2.3 Verify both tools are callable in a single LLM turn alongside `bash` (manual test: single prompt that chains worktree set + devcontainer on + bash)
 

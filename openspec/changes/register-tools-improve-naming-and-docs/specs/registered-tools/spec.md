@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: worktree tool registered
-The extension SHALL register a `worktree` tool via `pi.registerTool()` with an `action` parameter (`"set"` | `"off"` | `"prune"` | `"status"` | `"remove"`) and an optional `branch` string parameter.
+The extension SHALL register a `worktree` tool via `pi.registerTool()` using a TypeBox discriminated union schema so that `branch` is required when `action` is `"set"` or `"remove"`, and absent for `"off"`, `"prune"`, and `"status"`.
 
 #### Scenario: LLM calls worktree with action "set"
 - **WHEN** the LLM invokes `worktree` with `{ "action": "set", "branch": "feature/auth" }`
@@ -28,6 +28,18 @@ The extension SHALL register a `worktree` tool via `pi.registerTool()` with an `
 #### Scenario: Invalid action rejected
 - **WHEN** the LLM invokes `worktree` with an `action` value not in the enum
 - **THEN** the tool returns an error before `execute()` runs (TypeBox schema validation)
+
+#### Scenario: branch missing for set
+- **WHEN** the LLM invokes `worktree` with `{ "action": "set" }` and no `branch`
+- **THEN** the call is rejected by schema validation before `execute()` runs
+
+#### Scenario: branch missing for remove
+- **WHEN** the LLM invokes `worktree` with `{ "action": "remove" }` and no `branch`
+- **THEN** the call is rejected by schema validation before `execute()` runs
+
+#### Scenario: branch not accepted for stateless actions
+- **WHEN** the LLM invokes `worktree` with `{ "action": "off" }` (or `"prune"` or `"status"`)
+- **THEN** no `branch` parameter is present in the schema for those variants
 
 ### Requirement: devcontainer tool registered
 The extension SHALL register a `devcontainer` tool via `pi.registerTool()` with an `action` parameter (`"on"` | `"off"` | `"rebuild"` | `"logs"`).

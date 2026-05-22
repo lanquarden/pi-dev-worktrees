@@ -6,7 +6,7 @@ Fixing all three together ensures the documented interface matches the code, tha
 
 ## What Changes
 
-- **Register a `worktree` tool** via `pi.registerTool()` with an `action` parameter (`"set"`, `"off"`, `"prune"`, `"status"`, `"remove"`) and an optional `branch` parameter — the LLM can call it in a single turn for full worktree lifecycle management.
+- **Register a `worktree` tool** via `pi.registerTool()` with an `action` parameter (`"set"`, `"off"`, `"prune"`, `"status"`, `"remove"`) — `branch` is required for `set` and `remove`, not present for the others — the LLM can call it in a single turn for full worktree lifecycle management.
 - **Register a `devcontainer` tool** via `pi.registerTool()` with an `action` parameter (`"on"`, `"off"`, `"rebuild"`, `"logs"`) — mirrors the existing command.
 - **Collapse `/workspaces` and `/workspace-cleanup`** into `/worktree status` and `/worktree remove <branch>` respectively. `/worktree [set] <branch>` keeps the bare-branch form as the default action so existing TUI muscle-memory is preserved.
 - **Drop `/workspaces` and `/workspace-cleanup`** — no aliases, clean break at this early stage.
