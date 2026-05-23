@@ -52,6 +52,10 @@
       }
     ]
   },
+  "scripts": {
+    "test": "HOME=$(mktemp -d) vitest run",
+    "test:watch": "HOME=$(mktemp -d) vitest"
+  },
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
