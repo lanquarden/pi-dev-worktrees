@@ -59,16 +59,22 @@ The commit and tag SHALL be pushed back to the repository.
 
 ---
 
-### Requirement: Release workflow SHALL publish with public access
+### Requirement: Release workflow SHALL publish using OIDC trusted publishing
 
-`npm publish --workspace=<pkg>` SHALL be called with the npm registry configured
-and `NODE_AUTH_TOKEN` set from the `NPM_TOKEN` repository secret. The scoped
-packages' `publishConfig.access` is `"public"`, which npm respects automatically.
+The workflow SHALL have `permissions: id-token: write` and `actions/setup-node`
+SHALL set `registry-url: https://registry.npmjs.org/`. The npm CLI automatically
+detects the OIDC environment and exchanges the GitHub-issued token for a short-lived
+publish token. No `NODE_AUTH_TOKEN` or `NPM_TOKEN` secret is required.
 
-#### Scenario: package published to npm
+The scoped packages' `publishConfig.access` is `"public"`, which npm respects
+automatically.
+
+#### Scenario: package published to npm via OIDC
 - **GIVEN** the version is bumped and pushed
+- **AND** the package has a trusted publisher configured on npmjs.com pointing at this repo and workflow
 - **WHEN** `npm publish --workspace=packages/pi-dev-worktrees` runs
 - **THEN** the package is available at `https://www.npmjs.com/package/@lanquarden/pi-dev-worktrees`
+- **AND** provenance attestations are automatically generated
 
 ---
 

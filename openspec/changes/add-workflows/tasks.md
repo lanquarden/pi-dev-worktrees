@@ -19,7 +19,7 @@
     - `dry_run` (boolean, default false)
   - Steps:
     - Checkout
-    - Setup Node 22 with npm registry
+    - Setup Node 22 with npm registry (OIDC trusted publishing — no NPM_TOKEN needed)
     - `npm ci`
     - Run tests (`npm test --workspaces`)
     - Configure git user (actions bot)
@@ -32,4 +32,4 @@
 
 - [x] 3.1 Confirm `.github/workflows/test.yml` exists and is valid YAML
 - [x] 3.2 Confirm `.github/workflows/release.yml` exists and is valid YAML
-- [ ] 3.3 Push branch and verify test workflow triggers on the PR
+- [x] 3.3 Push branch and verify test workflow triggers on the PR

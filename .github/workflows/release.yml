@@ -51,6 +51,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # OIDC trusted publishing: id-token: write permission lets the runner
+      # generate an OIDC token that npm CLI exchanges automatically for a
+      # short-lived publish token. No NODE_AUTH_TOKEN or NPM_TOKEN needed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -74,8 +77,6 @@ jobs:
           else
             npm publish --workspace=packages/pi-dev-worktrees
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Release pi-dev-worktrees-dashboard-plugin
         if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
@@ -87,5 +88,3 @@ jobs:
           else
             npm publish --workspace=packages/pi-dev-worktrees-dashboard-plugin
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

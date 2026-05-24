@@ -40,11 +40,13 @@ Then push the commit and tag, and run `npm publish --workspace=<pkg>`.
 
 ---
 
-## D5 — npm token
+## D5 — npm authentication
 
-**Decision:** Use `NPM_TOKEN` repository secret, passed as `NODE_AUTH_TOKEN` environment variable. The workflow sets `registry-url: https://registry.npmjs.org/` via `actions/setup-node`.
+**Decision:** Use OIDC trusted publishing. The workflow has `permissions: id-token: write` and `actions/setup-node` sets `registry-url: https://registry.npmjs.org/`. The npm CLI (>= 11.5.1 on Node >= 22.14.0) detects the OIDC environment and exchanges the GitHub-issued token for a short-lived npm publish token automatically.
 
-**Rationale:** Standard GitHub Actions pattern for npm publishing. The token is never logged or exposed.
+No `NPM_TOKEN` secret or `NODE_AUTH_TOKEN` env var is needed.
+
+**Rationale:** Eliminates the security risk of long-lived tokens. Each publish uses a short-lived, workflow-specific credential. npm also automatically generates provenance attestations when publishing via OIDC.
 
 ---
 
