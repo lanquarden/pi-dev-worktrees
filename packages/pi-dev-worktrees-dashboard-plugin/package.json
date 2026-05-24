@@ -17,7 +17,7 @@
   "sideEffects": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/BlackBeltTechnology/pi-worktrees",
+    "url": "https://github.com/lanquarden/pi-dev-worktrees",
     "directory": "packages/pi-dev-worktrees-dashboard-plugin"
   },
   "exports": {
@@ -51,6 +51,10 @@
         "component": "EnhancedBashToolRenderer"
       }
     ]
+  },
+  "scripts": {
+    "test": "HOME=$(mktemp -d) vitest run",
+    "test:watch": "HOME=$(mktemp -d) vitest"
   },
   "peerDependencies": {
     "react": ">=18.0.0",

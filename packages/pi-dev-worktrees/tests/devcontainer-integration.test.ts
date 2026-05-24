@@ -32,7 +32,16 @@ const dockerAvailable = (() => {
   }
 })();
 
-const skipIntegration = process.env.SKIP_INTEGRATION === "1" || !dockerAvailable;
+const devcontainerAvailable = (() => {
+  try {
+    execSync("devcontainer --help", { stdio: "ignore", timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const skipIntegration = process.env.SKIP_INTEGRATION === "1" || !dockerAvailable || !devcontainerAvailable;
 
 /**
  * Run devcontainer up with the given workspace and override config.
