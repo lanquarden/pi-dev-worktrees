@@ -81,8 +81,16 @@ export function bashDispatchSummary(args?: Record<string, unknown>): string {
 /** Header chips function for registerToolRenderer opts */
 export function renderBashDispatchChips(args?: Record<string, unknown>): React.ReactNode {
   const dispatch = extractDispatchData(args);
-  if (!dispatch) return null;
-  return <DispatchChips dispatch={dispatch} />;
+  const rawCommand = dispatch?.llmCommand ?? (args?.command as string);
+  const parsedCwd = rawCommand ? parseDisplayCommand(rawCommand).cwd : null;
+  const effectiveCwd = dispatch?.cwd ?? parsedCwd ?? undefined;
+  const augmented = dispatch
+    ? { ...dispatch, cwd: effectiveCwd }
+    : effectiveCwd
+    ? ({ cwd: effectiveCwd } as BashDispatchData)
+    : null;
+  if (!augmented) return null;
+  return <DispatchChips dispatch={augmented} />;
 }
 
 /** Detail rows showing CWD / RTK rewrite / container target */
