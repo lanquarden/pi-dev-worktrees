@@ -724,15 +724,6 @@ export default function (pi: ExtensionAPI) {
           const { containerId } = readStartupOutcome(projectRoot);
           probeContainerRtk(projectRoot, containerId).then((available) => {
             containerRtkAvailable = available;
-            if (!available) {
-              ctx.ui.notify(
-                `pi-dev-worktrees: rtk is not found inside the devcontainer. ` +
-                  `Commands rewritten by pi-rtk-optimizer to include "| rtk compress" will fail inside the container. ` +
-                  `To fix, add rtk to the container via postCreateCommand in devcontainer.json:\n` +
-                  `  "postCreateCommand": "curl -fsSL https://pi-rtk.example.com/install.sh | sh"`,
-                "info",
-              );
-            }
           });
         }
       } else {
@@ -751,15 +742,6 @@ export default function (pi: ExtensionAPI) {
             const { containerId: probeContainerId } = readStartupOutcome(projectRoot);
             probeContainerRtk(projectRoot, probeContainerId).then((available) => {
               containerRtkAvailable = available;
-              if (!available) {
-                ctx.ui.notify(
-                  `pi-dev-worktrees: rtk is not found inside the devcontainer. ` +
-                    `Commands rewritten by pi-rtk-optimizer to include "| rtk compress" will fail inside the container. ` +
-                    `To fix, add rtk to the container via postCreateCommand in devcontainer.json:\n` +
-                    `  "postCreateCommand": "curl -fsSL https://pi-rtk.example.com/install.sh | sh"`,
-                  "info",
-                );
-              }
             });
           }
         }
