@@ -15,6 +15,23 @@ function extractDispatchData(args?: Record<string, unknown>): BashDispatchData |
   return (args as any)?._pluginData?.["pi-dev-worktrees:bash-dispatch"] as BashDispatchData | undefined;
 }
 
+/**
+ * Strip a leading `cd <path> && ` (or `; `) preamble from a command string
+ * for display purposes. Also strips leading `export VAR=value; ` blocks.
+ * Returns the bare command and the extracted cwd (if any).
+ */
+function parseDisplayCommand(cmd: string): { display: string; cwd: string | null } {
+  let s = cmd.trim();
+  // Strip leading `export VAR=value; ` blocks
+  s = s.replace(/^(?:export\s+)?\w+=[^;\n]*;\s*/g, "");
+  // Match leading `cd <path> && ` or `cd <path>; `
+  const cdMatch = s.match(/^cd\s+(\S+)\s*(?:&&|;)\s*/);
+  if (cdMatch) {
+    return { display: s.slice(cdMatch[0].length).trim(), cwd: cdMatch[1] };
+  }
+  return { display: s, cwd: null };
+}
+
 function DispatchChips({ dispatch }: { dispatch: BashDispatchData }) {
   return (
     <span className="flex items-center gap-1.5 shrink-0">
@@ -104,10 +121,24 @@ export function EnhancedBashToolRenderer(props: ToolRendererProps) {
   const dispatch = extractDispatchData(props.args);
 
   // Prefer the original LLM command (pre-cd-injection, pre-RTK) for the header.
-  // This avoids showing the full `cd /long/path && actual-command` boilerplate.
-  const displayCommand = dispatch?.llmCommand
+  const rawCommand = dispatch?.llmCommand
     ?? (props.args?.command as string)
     ?? "command";
+
+  // Strip leading `cd <path> &&` preamble — show the bare command in the header
+  // and surface the path as a CWD chip instead.
+  const { display: displayCommand, cwd: parsedCwd } = parseDisplayCommand(rawCommand);
+
+  // Merge: dispatch.cwd (injected by pi-dev-worktrees) takes precedence over
+  // a cwd parsed from the LLM's own command string.
+  const effectiveCwd = dispatch?.cwd ?? parsedCwd ?? undefined;
+
+  // Build an augmented dispatch view that includes the effective cwd.
+  const augmentedDispatch = dispatch
+    ? { ...dispatch, cwd: effectiveCwd }
+    : parsedCwd
+    ? { cwd: effectiveCwd } as BashDispatchData
+    : null;
 
   return (
     <div className="space-y-1">
@@ -116,10 +147,10 @@ export function EnhancedBashToolRenderer(props: ToolRendererProps) {
         <span className="text-xs text-[var(--text-secondary)] font-mono truncate flex-1">
           {displayCommand}
         </span>
-        {dispatch && <DispatchChips dispatch={dispatch} />}
+        {augmentedDispatch && <DispatchChips dispatch={augmentedDispatch} />}
       </div>
 
-      {dispatch && <DispatchDetail dispatch={dispatch} />}
+      {augmentedDispatch && <DispatchDetail dispatch={augmentedDispatch} />}
 
       {props.status === "running" && !props.result && (
         <div className="text-xs text-[var(--text-muted)] italic">Running…</div>
