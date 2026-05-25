@@ -70,6 +70,14 @@ function DispatchChips({ dispatch }: { dispatch: BashDispatchData }) {
   );
 }
 
+/** Summary override for the collapsed tool header row */
+export function bashDispatchSummary(args?: Record<string, unknown>): string {
+  const dispatch = extractDispatchData(args);
+  const raw = dispatch?.llmCommand ?? (args?.command as string) ?? "command";
+  const { display } = parseDisplayCommand(raw);
+  return `$ ${display.slice(0, 80)}`;
+}
+
 /** Header chips function for registerToolRenderer opts */
 export function renderBashDispatchChips(args?: Record<string, unknown>): React.ReactNode {
   const dispatch = extractDispatchData(args);

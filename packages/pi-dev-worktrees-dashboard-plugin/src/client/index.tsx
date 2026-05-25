@@ -9,12 +9,13 @@
  * reducer from pi-dev-worktrees:bash-dispatch events).
  */
 import { registerToolRenderer } from "@blackbelt-technology/dashboard-plugin-runtime";
-import { EnhancedBashToolRenderer, renderBashDispatchChips } from "./EnhancedBashToolRenderer.js";
+import { EnhancedBashToolRenderer, renderBashDispatchChips, bashDispatchSummary } from "./EnhancedBashToolRenderer.js";
 
 registerToolRenderer("bash", EnhancedBashToolRenderer, {
   headerChips: renderBashDispatchChips,
+  summary: bashDispatchSummary,
 });
 
 export { hasPiDevWorktrees } from "./predicates.js";
 export { PiDevWorktreesBadge } from "./PiDevWorktreesBadge.js";
-export { EnhancedBashToolRenderer, renderBashDispatchChips } from "./EnhancedBashToolRenderer.js";
+export { EnhancedBashToolRenderer, renderBashDispatchChips, bashDispatchSummary } from "./EnhancedBashToolRenderer.js";
