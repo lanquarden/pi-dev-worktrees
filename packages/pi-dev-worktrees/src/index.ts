@@ -783,6 +783,7 @@ export default function (pi: ExtensionAPI) {
       rtkCommand: rtkRewritten ? rtkCommand : undefined,
       routing: result.routing,
       containerId: result.containerId,
+      cwd: result.cwd,
       hasDevcontainer: state.devcontainer !== undefined,
     };
     (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", dispatchPayload);
