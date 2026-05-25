@@ -46,6 +46,8 @@ export interface InterceptResult {
   routing: BashRouting;
   /** Container ID when routing === "container" (short 12-char form) */
   containerId?: string;
+  /** Working directory prepended to the command (worktree path or container workspace) */
+  cwd?: string;
 }
 
 /**
@@ -202,6 +204,7 @@ export async function applyBashIntercept(
 
     // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
+    let containerCwd: string;
     if (state.worktree?.path) {
       // Map worktree host path → container-side path by replacing the host
       // workspace prefix with the container workspace prefix.
@@ -211,10 +214,12 @@ export async function applyBashIntercept(
       const containerWorktreePath = relative
         ? containerWorkspace + relative
         : state.worktree.path; // fallback: hope paths already match
+      containerCwd = containerWorktreePath;
       inner = cdSafe(containerWorktreePath, cmd);
     } else {
       // No worktree: run at the container workspace root.
       // cdSafe ensures we get a clear error if the mount is wrong.
+      containerCwd = containerWorkspace;
       inner = cdSafe(containerWorkspace, cmd);
     }
 
@@ -248,6 +253,7 @@ export async function applyBashIntercept(
         ),
         routing: "container",
         containerId: containerId.slice(0, 12),
+        cwd: containerCwd,
       };
     }
 
@@ -261,12 +267,13 @@ export async function applyBashIntercept(
         ` -- sh -c '${innerEscaped}'`
       ),
       routing: "container",
+      cwd: containerCwd,
     };
   }
 
   // Rule 5: worktree active — cd to worktree with failure guard
   if (state.worktree?.path) {
-    return { command: cdSafe(state.worktree.path, cmd), routing: "host" };
+    return { command: cdSafe(state.worktree.path, cmd), routing: "host", cwd: state.worktree.path };
   }
 
   // Rule 6: pass through unchanged
