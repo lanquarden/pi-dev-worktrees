@@ -367,6 +367,90 @@ describe("bash-dispatch emit", () => {
     }));
   });
 
+  it("uses llmCommand (not rtkCommand) in container when rtk not available in container", async () => {
+    const { state } = await import("../src/session.js");
+    const { readStartupOutcome, probeContainer } = await import("../src/devcontainer.js");
+    const { probeContainerRtk } = await import("../src/rtk-compat.js");
+
+    // Set devcontainer in starting state so the first tool_call triggers the
+    // startup→ready transition and fires probeContainerRtk.
+    (state as any).devcontainer = {
+      enabled: true,
+      starting: true,
+      workspace: "/project",
+      startedAt: Date.now(),
+    };
+
+    // Startup log reports success so the handler marks it ready immediately.
+    vi.mocked(readStartupOutcome).mockReturnValue({
+      outcome: "success",
+      containerId: "abc123def456",
+      remoteWorkspaceFolder: "/workspace",
+      message: undefined,
+    });
+
+    // RTK is NOT available in the container.
+    vi.mocked(probeContainerRtk).mockResolvedValue(false);
+    vi.mocked(probeContainer).mockReturnValue(true);
+
+    // Simulate pi-rtk-optimizer being loaded so the probe runs.
+    pi.getCommands.mockReturnValue([{ name: "rtk" }]);
+
+    const ctx = makeMockCtx(vi.fn());
+
+    // First tool_call: triggers transition + fires async probeContainerRtk.
+    await pi._emit("tool_execution_start", {
+      toolName: "bash",
+      toolCallId: "tc-probe",
+      args: { command: "echo probe" },
+    });
+    await pi._emit(
+      "tool_call",
+      { toolName: "bash", toolCallId: "tc-probe", input: { command: "echo probe" } },
+      ctx,
+    );
+
+    // Wait for probeContainerRtk to resolve and set containerRtkAvailable=false.
+    await new Promise((r) => setTimeout(r, 50));
+
+    pi.events.emit.mockClear();
+
+    // Now fire an RTK-rewritten command. The original LLM command was "npm test";
+    // RTK rewrote it to "npm test | rtk compress".
+    await pi._emit("tool_execution_start", {
+      toolName: "bash",
+      toolCallId: "tc-rtk-fallback",
+      args: { command: "npm test" },
+    });
+
+    const interceptInput = { command: "npm test | rtk compress" };
+    await pi._emit(
+      "tool_call",
+      { toolName: "bash", toolCallId: "tc-rtk-fallback", input: interceptInput },
+      ctx,
+    );
+
+    // Dispatch metadata should still record the RTK rewrite for the UI.
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "pi-dev-worktrees:bash-dispatch",
+      expect.objectContaining({
+        toolCallId: "tc-rtk-fallback",
+        llmCommand: "npm test",
+        rtkRewritten: true,
+        rtkCommand: "npm test | rtk compress",
+        routing: "container",
+      }),
+    );
+
+    // The mutated command must use the original llmCommand — no "rtk compress"
+    // must appear in the final devcontainer exec wrapper.
+    expect(interceptInput.command).toContain("npm test");
+    expect(interceptInput.command).not.toContain("rtk compress");
+
+    // Restore state so subsequent tests start clean.
+    delete (state as any).devcontainer;
+  });
+
   it("includes hasDevcontainer=false when no devcontainer in state", async () => {
     const ctx = makeMockCtx(vi.fn());
 
