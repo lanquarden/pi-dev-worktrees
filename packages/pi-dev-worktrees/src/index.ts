@@ -12,7 +12,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative, resolve, isAbsolute } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, StringEnum } from "@earendil-works/pi-ai";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
@@ -683,6 +683,24 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return;
     if (event.toolCallId) {
       pendingLlmCommands.set(event.toolCallId, (event.args as { command?: string })?.command ?? "");
+    }
+  });
+
+  // ── tool_call: route file tools (read/write/edit) to worktree for relative paths ────────────
+  pi.on("tool_call", async (event, _ctx) => {
+    if (!projectRoot) return;
+    // Only adjust when a worktree is active
+    const base = state.worktree?.path;
+    if (!base) return;
+
+    // Route built-in file tools by rewriting relative paths to be under the worktree.
+    // Absolute paths are left untouched to allow explicit targeting of project root or elsewhere.
+    if (event.toolName === "read" || event.toolName === "write" || event.toolName === "edit") {
+      const input = event.input as { path?: string };
+      const p = input?.path;
+      if (p && !isAbsolute(p)) {
+        input.path = join(base, p);
+      }
     }
   });
 
