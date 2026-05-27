@@ -91,6 +91,7 @@ On `/worktree feature/auth` (or `/worktree set feature/auth`), the extension:
 1. Auto-generates `.wtp.yml` at the project root (if absent)
 2. Runs `wtp add feature/auth` (or `wtp add -b feature/auth` for new branches)
 3. Prefixes all subsequent bash tool calls with `cd <worktree-path> &&`
+4. Routes file tools (read/write/edit) with relative paths to the active worktree (absolute paths untouched)
 
 #### Devcontainer
 
