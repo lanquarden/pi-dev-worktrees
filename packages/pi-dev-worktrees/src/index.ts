@@ -354,7 +354,12 @@ function workspacesSnapshot(): string {
       const marker = isCurrent ? "●" : "○";
       const suffix = isCurrent ? "  [this session]" : "";
       const relPath = relative(projectRoot, entry.path);
-      lines.push(`  ${marker} ${entry.branch.padEnd(20)} ${relPath}/${suffix}`);
+      let head = "";
+      try {
+        head = execSync("git rev-parse --abbrev-ref HEAD", { cwd: entry.path, encoding: "utf8", timeout: 3000 }).trim();
+      } catch { /* ignore */ }
+      const mismatch = head && head !== entry.branch ? `  [HEAD:${head}]` : "";
+      lines.push(`  ${marker} ${entry.branch.padEnd(20)} ${relPath}/${suffix}${mismatch}`);
     }
   }
 
