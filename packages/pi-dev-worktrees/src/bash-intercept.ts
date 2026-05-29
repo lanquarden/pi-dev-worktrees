@@ -187,7 +187,7 @@ export async function applyBashIntercept(
   if (dc?.enabled && !dc.starting) {
     // Check the startup log first before attempting a slow exec probe.
     // If devcontainer up reported success, trust it and wrap immediately.
-    const { outcome, containerId, remoteWorkspaceFolder: logRemoteWorkspace } = readStartupOutcome(projectRoot);
+    const { outcome, containerId: logContainerId, remoteWorkspaceFolder: logRemoteWorkspace } = readStartupOutcome(projectRoot);
     const alive = outcome === "success" || probeContainer(projectRoot);
     if (!alive) {
       const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
@@ -201,6 +201,7 @@ export async function applyBashIntercept(
     // saved updated state (e.g. session restored from disk, or first command
     // immediately after container-ready notification).
     const containerWorkspace = dc.remoteWorkspaceFolder ?? logRemoteWorkspace ?? hostWorkspace;
+    const effectiveContainerId = dc.containerId ?? logContainerId ?? (await import("./devcontainer.js")).findContainerIdByLabel(projectRoot);
 
     // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
@@ -243,16 +244,16 @@ export async function applyBashIntercept(
     // the override's workspaceFolder and the actual mount in the container
     // (e.g. when a pre-existing container started with a different config is
     // reused by devcontainer up).
-    if (containerId) {
+    if (effectiveContainerId) {
       return {
         command: (
           displayComment +
           `devcontainer exec` +
-          ` --container-id ${shellQuote(containerId)}` +
+          ` --container-id ${shellQuote(effectiveContainerId)}` +
           ` -- sh -c '${innerEscaped}'`
         ),
         routing: "container",
-        containerId: containerId.slice(0, 12),
+        containerId: effectiveContainerId.slice(0, 12),
         cwd: containerCwd,
       };
     }

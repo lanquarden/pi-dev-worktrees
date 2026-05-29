@@ -195,11 +195,33 @@ export function containerLogPath(projectRoot: string): string {
 }
 
 /**
+ * Find the container ID by Docker label devcontainer.local_folder=<projectRoot>.
+ * Returns the first matching container ID, or undefined if none found.
+ */
+export function findContainerIdByLabel(projectRoot: string): string | undefined {
+  try {
+    const filter = `label=devcontainer.local_folder=${projectRoot}`;
+    const ids = execSync(`docker ps --quiet --filter ${shellQuote(filter)}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    })
+      .split("\n")
+      .map(s => s.trim())
+      .filter(Boolean);
+    return ids[0];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Stop the devcontainer by stopping the Docker container whose ID was recorded
- * in the startup log. Falls back to a docker stop by label if no containerId.
+ * in the startup log. Falls back to stopping any containers labeled with
+ * devcontainer.local_folder=<projectRoot>.
  * Errors are swallowed — stopping is best-effort.
  */
-export function stopContainer(projectRoot: string): { stopped: boolean; containerId?: string } {
+export function stopContainer(projectRoot: string): { stopped: boolean; containerId?: string; stoppedAllByLabel?: boolean } {
   const { containerId } = readStartupOutcome(projectRoot);
   if (containerId) {
     try {
@@ -209,10 +231,33 @@ export function stopContainer(projectRoot: string): { stopped: boolean; containe
       });
       return { stopped: true, containerId };
     } catch {
-      return { stopped: false, containerId };
+      // Fall through to label-based stop if direct stop fails
     }
   }
-  return { stopped: false };
+
+  // Fallback: stop any containers created for this project (labeled by CLI)
+  try {
+    // devcontainers/cli labels containers with devcontainer.local_folder=<host_path>
+    const filter = `label=devcontainer.local_folder=${projectRoot}`;
+    const ids = execSync(`docker ps --quiet --filter ${shellQuote(filter)}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    })
+      .split("\n")
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return { stopped: false };
+    // Stop all matching containers
+    for (const id of ids) {
+      try {
+        execSync(`docker stop ${shellQuote(id)}`, { stdio: "ignore", timeout: 30_000 });
+      } catch { /* ignore individual failures */ }
+    }
+    return { stopped: true, stoppedAllByLabel: true };
+  } catch {
+    return { stopped: false };
+  }
 }
 
 /**
@@ -228,10 +273,6 @@ export function clearStartupLog(projectRoot: string): void {
   }
 }
 
-/**
- * Start the devcontainer in the background (detached, fire-and-forget).
- * Stdout and stderr are written to .pi/devcontainer-up.log.
- */
 /**
  * Build the argv array for `devcontainer up`.
  * Extracted so tests can assert on the exact flags without spawning a process.
@@ -294,7 +335,14 @@ export function tailContainerLog(projectRoot: string, lines = 20): string {
   try {
     const content = readFileSync(logPath, "utf8");
     const allLines = content.trimEnd().split("\n");
-    return allLines.slice(-lines).join("\n");
+    // Prefer only the most recent startup block, delimited by the header line we write before each start.
+    const header = "--- devcontainer up started at ";
+    let lastHeaderIdx = -1;
+    for (let i = allLines.length - 1; i >= 0; i--) {
+      if (allLines[i].startsWith(header)) { lastHeaderIdx = i; break; }
+    }
+    const recentBlock = lastHeaderIdx >= 0 ? allLines.slice(lastHeaderIdx) : allLines;
+    return recentBlock.slice(-lines).join("\n");
   } catch {
     return "";
   }

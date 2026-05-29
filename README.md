@@ -51,10 +51,10 @@ npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
 - **`/worktree remove <branch>`** — remove a worktree (prompts for confirmation)
 - **`/worktree init`** — interactively create `.wtp.yml`
 - **`/worktree hooks [show | add <cmd> | remove <n> | clear]`** — manage post-create hooks in `.wtp.yml`
-- **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; `rebuild` forces `--no-cache`
+- **`/devcontainer [on | off | stop | rebuild | logs]`** — target the project devcontainer; `rebuild` forces `--no-cache`. `off` disables targeting in this session without stopping the container; `stop` stops the container.
 - **LLM tools** (`worktree`, `devcontainer`) — same operations callable by the LLM as tools in a single turn:
   - `worktree` — `action`: `"set"` (branch required) | `"remove"` (branch required) | `"off"` | `"prune"` | `"status"`
-  - `devcontainer` — `action`: `"on"` | `"off"` | `"rebuild"` | `"logs"`
+  - `devcontainer` — `action`: `"on"` | `"off"` | `"stop"` | `"rebuild"` | `"logs"`
 
 ### Per-repo Config
 

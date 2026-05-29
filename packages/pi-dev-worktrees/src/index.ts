@@ -50,6 +50,7 @@ import {
   tailContainerLog,
   containerLogPath,
   readStartupOutcome,
+  findContainerIdByLabel,
 } from "./devcontainer.js";
 import {
   emitWorkspaceCreated,
@@ -221,7 +222,8 @@ function devcontainerStatus(): ActionResult {
   if (!projectRoot) return { ok: false, message: "Not in a git repository" };
   if (state.devcontainer?.enabled) {
     const status = state.devcontainer.starting ? "starting…" : "running";
-    return { ok: true, message: `Devcontainer ${status} at ${state.devcontainer.workspace}` };
+    const id = state.devcontainer.containerId ? ` (id: ${state.devcontainer.containerId.slice(0, 12)})` : "";
+    return { ok: true, message: `Devcontainer ${status} at ${state.devcontainer.workspace}${id}` };
   }
   return { ok: true, message: "Devcontainer targeting is off" };
 }
@@ -230,27 +232,20 @@ function devcontainerOff(pi: ExtensionAPI): ActionResult {
   if (!projectRoot) return { ok: false, message: "Not in a git repository" };
   const workspace = state.devcontainer?.workspace ?? projectRoot;
 
-  // Stop the actual Docker container so the next /devcontainer on starts fresh
-  // with the current override config. Clear the startup log so stale
-  // outcome:success doesn't short-circuit the next devcontainer up.
-  const { stopped, containerId } = stopContainer(projectRoot);
-  clearStartupLog(projectRoot);
-
+  // Do NOT stop the container on 'off' — other sessions may be using it.
+  // Simply disable targeting in this session.
   if (state.devcontainer) {
     state.devcontainer.enabled = false;
     state.devcontainer.starting = false;
-    state.devcontainer.remoteWorkspaceFolder = undefined;
   }
   saveState(pi, state);
   emitDevcontainerStopped(pi, workspace, projectRoot);
   emitStateUpdate(pi, state);
 
-  const stopNote = stopped
-    ? ` Container ${containerId ? containerId.slice(0, 12) : ""} stopped.`
-    : containerId
-    ? ` Could not stop container ${containerId.slice(0, 12)} — stop it manually if needed.`
-    : " No container ID found in log — container may still be running.";
-  return { ok: true, message: `Devcontainer targeting off.${stopNote}` };
+  const idNote = state.devcontainer?.containerId
+    ? ` Container ${state.devcontainer.containerId.slice(0, 12)} remains running.`
+    : " Container remains running.";
+  return { ok: true, message: `Devcontainer targeting off.${idNote} Use /devcontainer stop to stop it.` };
 }
 
 function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
@@ -272,6 +267,7 @@ function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }
 
+  // Force rebuild: stop any running container and clear the log before starting with --no-cache
   stopContainer(projectRoot);
   clearStartupLog(projectRoot);
 
@@ -281,7 +277,7 @@ function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
   }
 
-  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now() };
+  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now(), containerId: undefined };
   saveState(pi, state);
   emitDevcontainerStarting(pi, projectRoot, projectRoot);
   emitStateUpdate(pi, state);
@@ -302,23 +298,36 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
     return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
 
   try {
-    // Always regenerate the override on explicit /devcontainer on so it
-    // stays in sync with the current devcontainer.json.
+    // Regenerate the override so it stays in sync with the current devcontainer.json.
     generateOverrideJson(projectRoot, configPath, /* force */ true);
   } catch (err) {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }
 
-  // Stop any existing container and clear the stale log before starting fresh.
-  // This ensures the override config (just regenerated above) is always applied
-  // to a new container — not silently ignored because devcontainer up reused a
-  // pre-existing one that was started with a different configuration.
+  // If a container is already responding for this project, reuse it instead of restarting.
+  if (probeContainer(projectRoot)) {
+    const { containerId: logId, remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
+    const labelId = findContainerIdByLabel(projectRoot);
+    const resolvedId = logId ?? labelId ?? state.devcontainer?.containerId;
+    state.devcontainer = {
+      enabled: true,
+      workspace: projectRoot,
+      starting: false,
+      remoteWorkspaceFolder: remoteWorkspaceFolder ?? state.devcontainer?.remoteWorkspaceFolder,
+      containerId: resolvedId,
+    };
+    saveState(pi, state);
+    emitDevcontainerReady(pi, projectRoot, projectRoot);
+    emitStateUpdate(pi, state);
+    const idMsg = state.devcontainer.containerId ? ` (container ${state.devcontainer.containerId.slice(0, 12)})` : " (id unknown)";
+    return { ok: true, message: `Devcontainer targeting on — reusing running container${idMsg}` };
+  }
+
+  // Otherwise, clean up any stale container and start fresh.
   stopContainer(projectRoot);
   clearStartupLog(projectRoot);
 
   try {
-    // --remove-existing-container forces devcontainer up to remove and recreate
-    // rather than reusing a stale container from a previous session.
     startContainer(projectRoot, /* removeExisting */ true);
   } catch (err) {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
@@ -735,13 +744,15 @@ export default function (pi: ExtensionAPI) {
         if (remoteWorkspaceFolder) {
           state.devcontainer.remoteWorkspaceFolder = remoteWorkspaceFolder;
         }
+        const { containerId } = readStartupOutcome(projectRoot);
+        if (containerId) {
+          state.devcontainer.containerId = containerId;
+        }
         saveState(pi, state);
         emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
         emitStateUpdate(pi, state);
         ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-        // No notify — the [container] prefix on the first tool result is
-        // sufficient; an inline notify card would mask the actual output
-        // in the dashboard.
+        ctx.ui.notify(`Devcontainer ready${state.devcontainer.containerId ? ` — ${state.devcontainer.containerId.slice(0, 12)}` : ""}`, "info");
         // Probe for rtk in the container if pi-rtk-optimizer is loaded.
         if (pi.getCommands().some((c) => c.name === "rtk")) {
           const { containerId } = readStartupOutcome(projectRoot);
@@ -755,11 +766,14 @@ export default function (pi: ExtensionAPI) {
         const alive = probeContainer(projectRoot);
         if (alive) {
           state.devcontainer.starting = false;
+          const { containerId: probeContainerId, remoteWorkspaceFolder: probeRemote } = readStartupOutcome(projectRoot);
+          if (probeContainerId) state.devcontainer.containerId = probeContainerId;
+          if (probeRemote && !state.devcontainer.remoteWorkspaceFolder) state.devcontainer.remoteWorkspaceFolder = probeRemote;
           saveState(pi, state);
           emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
           emitStateUpdate(pi, state);
           ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-          // No notify — same reason as above.
+          ctx.ui.notify(`Devcontainer ready${state.devcontainer.containerId ? ` — ${state.devcontainer.containerId.slice(0, 12)}` : ""}`, "info");
           // Probe for rtk in the container if pi-rtk-optimizer is loaded.
           if (pi.getCommands().some((c) => c.name === "rtk")) {
             const { containerId: probeContainerId } = readStartupOutcome(projectRoot);
@@ -924,10 +938,10 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "devcontainer",
     label: "Devcontainer",
-    description: "Manage devcontainer targeting. Use action='on' to start, 'off' to stop, 'rebuild' to force full image rebuild, 'logs' to tail startup output.",
+    description: "Manage devcontainer targeting. Use action='on' to start, 'off' to disable targeting, 'stop' to stop the container, 'rebuild' to force full image rebuild, 'logs' to tail startup output.",
     promptSnippet: "Start, stop, rebuild or check logs for the devcontainer",
     parameters: Type.Object({
-      action: StringEnum(["on", "off", "rebuild", "logs"] as const, {
+      action: StringEnum(["on", "off", "stop", "rebuild", "logs"] as const, {
         description: "Operation to perform on the devcontainer",
       }),
     }),
@@ -938,6 +952,32 @@ export default function (pi: ExtensionAPI) {
       switch (action) {
         case "on":      result = devcontainerOn(pi); break;
         case "off":     result = devcontainerOff(pi); break;
+        case "stop": {
+          if (!projectRoot) {
+            result = { ok: false, message: "Not in a git repository" };
+          } else {
+            const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
+            if (stopped) {
+              clearStartupLog(projectRoot);
+              const workspace = state.devcontainer?.workspace ?? projectRoot;
+              if (state.devcontainer) {
+                state.devcontainer.enabled = false;
+                state.devcontainer.starting = false;
+                state.devcontainer.containerId = undefined;
+              }
+              saveState(pi, state);
+              emitDevcontainerStopped(pi, workspace, projectRoot);
+              emitStateUpdate(pi, state);
+              const note = stoppedAllByLabel
+                ? "Devcontainer(s) stopped by label"
+                : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
+              result = { ok: true, message: note };
+            } else {
+              result = { ok: false, message: `Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}` };
+            }
+          }
+          break;
+        }
         case "rebuild": result = devcontainerRebuild(pi); break;
         case "logs": {
           if (!projectRoot) {
@@ -1063,7 +1103,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("devcontainer", {
-    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | rebuild | logs]",
+    description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | stop | rebuild | logs]",
     handler: async (args, ctx) => {
       const arg = args?.trim();
       if (!arg) {
@@ -1075,6 +1115,30 @@ export default function (pi: ExtensionAPI) {
         const r = devcontainerOff(pi);
         ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
+        return;
+      }
+      if (arg === "stop") {
+        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
+        if (stopped) {
+          clearStartupLog(projectRoot);
+          const workspace = state.devcontainer?.workspace ?? projectRoot;
+          if (state.devcontainer) {
+            state.devcontainer.enabled = false;
+            state.devcontainer.starting = false;
+            state.devcontainer.containerId = undefined;
+          }
+          saveState(pi, state);
+          emitDevcontainerStopped(pi, workspace, projectRoot);
+          emitStateUpdate(pi, state);
+          const note = stoppedAllByLabel
+            ? "Devcontainer(s) stopped by label"
+            : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
+          ctx.ui.notify(note, "info");
+        } else {
+          ctx.ui.notify(`Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}`, "warning");
+        }
+        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
         return;
       }
       if (arg === "rebuild") {
@@ -1099,7 +1163,7 @@ export default function (pi: ExtensionAPI) {
         }
         return;
       }
-      ctx.ui.notify("Usage: /devcontainer [on | off | rebuild | logs]", "info");
+      ctx.ui.notify("Usage: /devcontainer [on | off | stop | rebuild | logs]", "info");
     },
   });
 
