@@ -52,17 +52,17 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # OIDC trusted publishing: id-token: write permission lets the runner
-      # generate an OIDC token. setup-node with registry-url writes an
-      # _authToken line to .npmrc that blocks the OIDC flow — strip it.
+      # generate an OIDC token. npm CLI detects the OIDC environment and
+      # exchanges it for a short-lived publish token automatically.
+      # Note: cache: npm can restore a stale .npmrc with _authToken that
+      # blocks the OIDC flow. We strip it after setup as a safety net.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org/'
+          registry-url: 'https://registry.npmjs.org'
           cache: npm
 
-      # Remove _authToken from .npmrc so npm CLI uses OIDC instead of a
-      # (possibly empty) token. The registry URL itself is preserved.
-      - run: npm config delete //registry.npmjs.org/:_authToken
+      - run: npm config delete //registry.npmjs.org/:_authToken || true
 
       - run: npm ci
 
@@ -84,7 +84,8 @@ jobs:
             npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees
             echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
           else
-            npm publish --access public --workspace=packages/pi-dev-worktrees
+            cd packages/pi-dev-worktrees && npm publish --access public
+            cd ../..
             gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes
           fi
 
@@ -101,6 +102,7 @@ jobs:
             npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees-dashboard-plugin
             echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
           else
-            npm publish --access public --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            cd packages/pi-dev-worktrees-dashboard-plugin && npm publish --access public
+            cd ../..
             gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes
           fi
