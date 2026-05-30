@@ -29,12 +29,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
-          cache: npm
+          node-version: '24'
+          package-manager-cache: false
 
       - run: npm ci
 
@@ -47,22 +47,18 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # OIDC trusted publishing: id-token: write permission lets the runner
       # generate an OIDC token. npm CLI detects the OIDC environment and
       # exchanges it for a short-lived publish token automatically.
-      # Note: cache: npm can restore a stale .npmrc with _authToken that
-      # blocks the OIDC flow. We strip it after setup as a safety net.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: npm
-
-      - run: npm config delete //registry.npmjs.org/:_authToken || true
 
       - run: npm ci
 
