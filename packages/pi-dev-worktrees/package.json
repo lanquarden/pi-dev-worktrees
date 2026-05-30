@@ -26,7 +26,8 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "README.md"
   ],
   "pi": {
     "extensions": [

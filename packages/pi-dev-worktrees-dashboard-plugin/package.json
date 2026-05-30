@@ -31,7 +31,8 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "README.md"
   ],
   "pi-dashboard-plugin": {
     "id": "pi-dev-worktrees",

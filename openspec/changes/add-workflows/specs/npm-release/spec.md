@@ -45,16 +45,16 @@ If tests fail, the workflow SHALL abort without publishing.
 
 ### Requirement: Release workflow SHALL create git tags
 
-For each released package, the workflow SHALL run `npm version <bump> --workspace=<pkg>`
-which creates a git tag (e.g., `pi-dev-worktrees-v0.2.1`) and commits the version bump.
-The commit and tag SHALL be pushed back to the repository.
+For each released package, the workflow SHALL bump the version with
+`npm version --no-git-tag-version`, then create a manual git tag in the
+format `v<version>` (e.g., `v0.2.1`) and push both the commit and tag.
 
 #### Scenario: git tag created
 - **GIVEN** `pi-dev-worktrees` is at version `0.2.0`
 - **AND** `version_bump: patch` is selected
-- **WHEN** `npm version patch --workspace=packages/pi-dev-worktrees` runs
-- **THEN** a commit is created with message `0.2.1`
-- **AND** a tag `pi-dev-worktrees-v0.2.1` is created
+- **WHEN** the release step runs
+- **THEN** a commit is created with message `pi-dev-worktrees v0.2.1`
+- **AND** a tag `v0.2.1` is created
 - **AND** both are pushed to the remote
 
 ---

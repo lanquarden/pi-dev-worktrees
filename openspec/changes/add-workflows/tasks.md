@@ -23,8 +23,8 @@
     - `npm ci`
     - Run tests (`npm test --workspaces`)
     - Configure git user (actions bot)
-    - For each selected package: `npm version <bump> --workspace=<pkg>`, push commit + tag, `npm publish --workspace=<pkg>`
-    - Skip publish in dry-run mode
+    - For each selected package: bump version (`npm version --no-git-tag-version`), commit, create `v<version>` tag, push commit + tag, `npm publish --access public`, create GitHub Release (`gh release create v<version> --generate-notes`)
+    - Skip publish and release creation in dry-run mode
 
 ---
 

@@ -29,14 +29,9 @@
 
 ## D4 — Release workflow versioning strategy
 
-**Decision:** Use `npm version <bump> --workspace=<pkg>` which:
-1. Bumps `version` in the workspace `package.json`
-2. Creates a git tag (e.g., `pi-dev-worktrees-v0.2.1`)
-3. Commits the change
+**Decision:** Use `npm version <bump> --no-git-tag-version` to bump the version in `package.json` without auto-tagging, then manually create a `v<version>` tag (e.g., `v0.2.1`). Commit, tag, and push, then run `npm publish --access public`.
 
-Then push the commit and tag, and run `npm publish --workspace=<pkg>`.
-
-**Rationale:** `npm version` handles the tag naming and commit message automatically, keeping the release traceable in git history. Tags are prefixed with the package name to distinguish releases in a multi-package monorepo.
+**Rationale:** Both packages release in lock step, so a simple `v<version>` tag is cleaner than npm's default per-workspace tag format (`@scope/name@version`). `--no-git-tag-version` gives us full control over tag naming. Explicit `--access public` makes the public visibility intent clear even though `publishConfig.access` is set.
 
 ---
 
@@ -55,3 +50,11 @@ No `NPM_TOKEN` secret or `NODE_AUTH_TOKEN` env var is needed.
 **Decision:** When `package` input is `both`, release sequentially: bump + publish pi-dev-worktrees first, then bump + publish dashboard-plugin.
 
 **Rationale:** The dashboard plugin depends on pi-dev-worktrees conceptually (it decorates sessions that use the extension), but there is no npm dependency between them. Sequential release is safe and simple.
+
+---
+
+## D7 — GitHub Release creation
+
+**Decision:** After publishing, create a GitHub Release from the `v<version>` tag using `gh release create --generate-notes`.
+
+**Rationale:** `--generate-notes` auto-populates the release with merged PRs and commits since the last tag, making each release discoverable on the GitHub Releases page without manual changelog maintenance. The `gh` CLI is pre-installed on GitHub Actions runners and uses the `GITHUB_TOKEN` from checkout.
