@@ -53,6 +53,7 @@ vi.mock("../src/worktrees.js", () => ({
   removeHook: vi.fn(),
   formatHook: vi.fn(),
   listWtpWorktrees: vi.fn().mockReturnValue([]),
+  shellEscapeArg: (s: string) => `'${s.replace(/'/g, "'\\''")}'`,
 }));
 
 vi.mock("../src/config.js", () => ({

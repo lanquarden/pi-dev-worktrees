@@ -13,7 +13,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, StringEnum } from "@earendil-works/pi-ai";
 import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
@@ -33,6 +33,7 @@ import {
   removeHook,
   formatHook,
   listWtpWorktrees,
+  shellEscapeArg,
 } from "./worktrees.js";
 import type { WtpHook } from "./worktrees.js";
 import {
@@ -116,10 +117,6 @@ function buildStatusString(s: WorktreesState): string {
   return parts.join(" | ");
 }
 
-function shellEscapeArg(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
 function enumerateWorktreeDirs(
   dir: string,
   worktreesRoot: string,
@@ -185,10 +182,7 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
   } catch { /* ignore */ }
 
   try {
-    const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
-    if (generated) {
-      // non-fatal notice — caller can surface this
-    }
+    ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
   } catch (err) {
     return { ok: false, message: `Failed to write .wtp.yml: ${String(err)}` };
   }
@@ -216,6 +210,34 @@ function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
   emitStateUpdate(pi, state);
 
   return { ok: true, message: `Worktree active: ${relPath}/ — bash runs there`, hookOutput };
+}
+
+/** Mark the devcontainer as ready: update state, persist, emit events, notify, and probe for RTK. */
+function transitionContainerToReady(
+  pi: ExtensionAPI,
+  ctx: { ui: ExtensionContext["ui"] },
+): void {
+  state.devcontainer.starting = false;
+  const outcome = readStartupOutcome(projectRoot);
+  if (outcome.remoteWorkspaceFolder) {
+    state.devcontainer.remoteWorkspaceFolder = outcome.remoteWorkspaceFolder;
+  }
+  if (outcome.containerId) {
+    state.devcontainer.containerId = outcome.containerId;
+  }
+  saveState(pi, state);
+  emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
+  emitStateUpdate(pi, state);
+  ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+  const idNote = state.devcontainer.containerId
+    ? ` — ${state.devcontainer.containerId.slice(0, 12)}`
+    : "";
+  ctx.ui.notify(`Devcontainer ready${idNote}`, "info");
+  if (pi.getCommands().some((c) => c.name === "rtk")) {
+    probeContainerRtk(projectRoot, outcome.containerId).then((available) => {
+      containerRtkAvailable = available;
+    });
+  }
 }
 
 function devcontainerStatus(): ActionResult {
@@ -338,6 +360,32 @@ function devcontainerOn(pi: ExtensionAPI): ActionResult {
   emitDevcontainerStarting(pi, projectRoot, projectRoot);
   emitStateUpdate(pi, state);
   return { ok: true, message: "Container starting… bash commands will queue until it's ready" };
+}
+
+/**
+ * Stop the devcontainer and clean up all associated state.
+ * Returns the status message — callers handle their own output (tool result vs. notification).
+ */
+function doDevcontainerStop(pi: ExtensionAPI): ActionResult {
+  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
+  if (stopped) {
+    clearStartupLog(projectRoot);
+    const workspace = state.devcontainer?.workspace ?? projectRoot;
+    if (state.devcontainer) {
+      state.devcontainer.enabled = false;
+      state.devcontainer.starting = false;
+      state.devcontainer.containerId = undefined;
+    }
+    saveState(pi, state);
+    emitDevcontainerStopped(pi, workspace, projectRoot);
+    emitStateUpdate(pi, state);
+    const note = stoppedAllByLabel
+      ? "Devcontainer(s) stopped by label"
+      : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
+    return { ok: true, message: note };
+  }
+  return { ok: false, message: `Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}` };
 }
 
 function workspacesSnapshot(): string {
@@ -672,6 +720,7 @@ export default function (pi: ExtensionAPI) {
       lines.push(`- Branch: \`${state.worktree.branch}\``);
       lines.push(`- Worktree path: \`${state.worktree.path}\``);
       lines.push("- Bash commands are run inside this worktree directory on the host");
+      lines.push("- File tools (read/write/edit) with relative paths are also routed to the worktree — use absolute paths to target the original project root");
     }
     if (state.devcontainer?.enabled) {
       const status = state.devcontainer.starting ? "starting…" : "running";
@@ -725,9 +774,8 @@ export default function (pi: ExtensionAPI) {
     if (state.devcontainer?.enabled && state.devcontainer.starting) {
       // Fast-path: check if the startup log already says success or error
       // before doing the slower exec probe.
-      const { outcome, message: outcomeMsg, remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
+      const { outcome, message: outcomeMsg } = readStartupOutcome(projectRoot);
       if (outcome === "error") {
-        // Container failed to start — turn off targeting so commands run on host
         state.devcontainer.starting = false;
         state.devcontainer.enabled = false;
         saveState(pi, state);
@@ -739,49 +787,9 @@ export default function (pi: ExtensionAPI) {
           "warning",
         );
       } else if (outcome === "success") {
-        // devcontainer up completed successfully — trust the log, mark ready.
-        state.devcontainer.starting = false;
-        if (remoteWorkspaceFolder) {
-          state.devcontainer.remoteWorkspaceFolder = remoteWorkspaceFolder;
-        }
-        const { containerId } = readStartupOutcome(projectRoot);
-        if (containerId) {
-          state.devcontainer.containerId = containerId;
-        }
-        saveState(pi, state);
-        emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
-        emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-        ctx.ui.notify(`Devcontainer ready${state.devcontainer.containerId ? ` — ${state.devcontainer.containerId.slice(0, 12)}` : ""}`, "info");
-        // Probe for rtk in the container if pi-rtk-optimizer is loaded.
-        if (pi.getCommands().some((c) => c.name === "rtk")) {
-          const { containerId } = readStartupOutcome(projectRoot);
-          probeContainerRtk(projectRoot, containerId).then((available) => {
-            containerRtkAvailable = available;
-          });
-        }
-      } else {
-        // No outcome line yet — container still starting; try a direct exec probe
-        // as a fallback (handles cases where devcontainer up doesn't write JSON).
-        const alive = probeContainer(projectRoot);
-        if (alive) {
-          state.devcontainer.starting = false;
-          const { containerId: probeContainerId, remoteWorkspaceFolder: probeRemote } = readStartupOutcome(projectRoot);
-          if (probeContainerId) state.devcontainer.containerId = probeContainerId;
-          if (probeRemote && !state.devcontainer.remoteWorkspaceFolder) state.devcontainer.remoteWorkspaceFolder = probeRemote;
-          saveState(pi, state);
-          emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
-          emitStateUpdate(pi, state);
-          ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-          ctx.ui.notify(`Devcontainer ready${state.devcontainer.containerId ? ` — ${state.devcontainer.containerId.slice(0, 12)}` : ""}`, "info");
-          // Probe for rtk in the container if pi-rtk-optimizer is loaded.
-          if (pi.getCommands().some((c) => c.name === "rtk")) {
-            const { containerId: probeContainerId } = readStartupOutcome(projectRoot);
-            probeContainerRtk(projectRoot, probeContainerId).then((available) => {
-              containerRtkAvailable = available;
-            });
-          }
-        }
+        transitionContainerToReady(pi, ctx);
+      } else if (probeContainer(projectRoot)) {
+        transitionContainerToReady(pi, ctx);
       }
     }
 
@@ -953,29 +961,7 @@ export default function (pi: ExtensionAPI) {
         case "on":      result = devcontainerOn(pi); break;
         case "off":     result = devcontainerOff(pi); break;
         case "stop": {
-          if (!projectRoot) {
-            result = { ok: false, message: "Not in a git repository" };
-          } else {
-            const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
-            if (stopped) {
-              clearStartupLog(projectRoot);
-              const workspace = state.devcontainer?.workspace ?? projectRoot;
-              if (state.devcontainer) {
-                state.devcontainer.enabled = false;
-                state.devcontainer.starting = false;
-                state.devcontainer.containerId = undefined;
-              }
-              saveState(pi, state);
-              emitDevcontainerStopped(pi, workspace, projectRoot);
-              emitStateUpdate(pi, state);
-              const note = stoppedAllByLabel
-                ? "Devcontainer(s) stopped by label"
-                : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
-              result = { ok: true, message: note };
-            } else {
-              result = { ok: false, message: `Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}` };
-            }
-          }
+          result = doDevcontainerStop(pi);
           break;
         }
         case "rebuild": result = devcontainerRebuild(pi); break;
@@ -1118,27 +1104,9 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (arg === "stop") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-        const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
-        if (stopped) {
-          clearStartupLog(projectRoot);
-          const workspace = state.devcontainer?.workspace ?? projectRoot;
-          if (state.devcontainer) {
-            state.devcontainer.enabled = false;
-            state.devcontainer.starting = false;
-            state.devcontainer.containerId = undefined;
-          }
-          saveState(pi, state);
-          emitDevcontainerStopped(pi, workspace, projectRoot);
-          emitStateUpdate(pi, state);
-          const note = stoppedAllByLabel
-            ? "Devcontainer(s) stopped by label"
-            : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
-          ctx.ui.notify(note, "info");
-        } else {
-          ctx.ui.notify(`Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}`, "warning");
-        }
+        const r = doDevcontainerStop(pi);
         ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+        ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
       if (arg === "rebuild") {

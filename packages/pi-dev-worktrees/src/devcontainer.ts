@@ -195,13 +195,13 @@ export function containerLogPath(projectRoot: string): string {
 }
 
 /**
- * Find the container ID by Docker label devcontainer.local_folder=<projectRoot>.
- * Returns the first matching container ID, or undefined if none found.
+ * List all running container IDs labeled with devcontainer.local_folder=<projectRoot>.
+ * Returns an empty array if none found or on error.
  */
-export function findContainerIdByLabel(projectRoot: string): string | undefined {
+function listContainerIdsByLabel(projectRoot: string): string[] {
   try {
     const filter = `label=devcontainer.local_folder=${projectRoot}`;
-    const ids = execSync(`docker ps --quiet --filter ${shellQuote(filter)}`, {
+    return execSync(`docker ps --quiet --filter ${shellQuote(filter)}`, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10_000,
@@ -209,10 +209,17 @@ export function findContainerIdByLabel(projectRoot: string): string | undefined 
       .split("\n")
       .map(s => s.trim())
       .filter(Boolean);
-    return ids[0];
   } catch {
-    return undefined;
+    return [];
   }
+}
+
+/**
+ * Find the first container ID by Docker label devcontainer.local_folder=<projectRoot>.
+ * Returns undefined if none found.
+ */
+export function findContainerIdByLabel(projectRoot: string): string | undefined {
+  return listContainerIdsByLabel(projectRoot)[0];
 }
 
 /**
@@ -236,28 +243,14 @@ export function stopContainer(projectRoot: string): { stopped: boolean; containe
   }
 
   // Fallback: stop any containers created for this project (labeled by CLI)
-  try {
-    // devcontainers/cli labels containers with devcontainer.local_folder=<host_path>
-    const filter = `label=devcontainer.local_folder=${projectRoot}`;
-    const ids = execSync(`docker ps --quiet --filter ${shellQuote(filter)}`, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 10_000,
-    })
-      .split("\n")
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (ids.length === 0) return { stopped: false };
-    // Stop all matching containers
-    for (const id of ids) {
-      try {
-        execSync(`docker stop ${shellQuote(id)}`, { stdio: "ignore", timeout: 30_000 });
-      } catch { /* ignore individual failures */ }
-    }
-    return { stopped: true, stoppedAllByLabel: true };
-  } catch {
-    return { stopped: false };
+  const ids = listContainerIdsByLabel(projectRoot);
+  if (ids.length === 0) return { stopped: false };
+  for (const id of ids) {
+    try {
+      execSync(`docker stop ${shellQuote(id)}`, { stdio: "ignore", timeout: 30_000 });
+    } catch { /* ignore individual failures */ }
   }
+  return { stopped: true, stoppedAllByLabel: true };
 }
 
 /**

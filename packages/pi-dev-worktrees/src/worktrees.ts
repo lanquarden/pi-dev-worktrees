@@ -325,7 +325,7 @@ export function listWtpWorktrees(
 /**
  * Append a pattern to .gitignore if not already present.
  */
-function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
+export function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
   const gitignorePath = join(projectRoot, ".gitignore");
   let existing = "";
 
@@ -344,6 +344,6 @@ function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
 /**
  * Simple shell argument escaping (single-quote wrapping).
  */
-function shellEscapeArg(s: string): string {
+export function shellEscapeArg(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }

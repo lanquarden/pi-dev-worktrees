@@ -21,7 +21,7 @@
  */
 
 import { join } from "node:path";
-import { probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
+import { findContainerIdByLabel, probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
 import type { WorktreesState } from "./session.js";
 
 /** Timeout in ms after which a still-starting container is considered stuck. */
@@ -201,7 +201,7 @@ export async function applyBashIntercept(
     // saved updated state (e.g. session restored from disk, or first command
     // immediately after container-ready notification).
     const containerWorkspace = dc.remoteWorkspaceFolder ?? logRemoteWorkspace ?? hostWorkspace;
-    const effectiveContainerId = dc.containerId ?? logContainerId ?? (await import("./devcontainer.js")).findContainerIdByLabel(projectRoot);
+    const effectiveContainerId = dc.containerId ?? logContainerId ?? findContainerIdByLabel(projectRoot);
 
     // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
