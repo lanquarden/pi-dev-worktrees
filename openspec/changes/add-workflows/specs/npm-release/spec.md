@@ -88,3 +88,25 @@ Version bumps SHALL NOT be committed or pushed in dry-run mode.
 - **WHEN** the workflow reaches the publish step
 - **THEN** `npm publish --dry-run` is used instead
 - **AND** no git changes are pushed
+
+---
+
+### Requirement: Release workflow SHALL create a GitHub Release
+
+After publishing each package, the workflow SHALL create a GitHub Release
+from the new tag using `gh release create` with auto-generated release notes
+(`--generate-notes`). This makes each npm release discoverable on the GitHub
+Releases page.
+
+#### Scenario: GitHub Release created after publish
+- **GIVEN** `pi-dev-worktrees` is published to npm
+- **AND** a git tag exists for the new version
+- **WHEN** the release step completes
+- **THEN** a GitHub Release is created from the tag
+- **AND** release notes are auto-generated from merged pull requests
+
+#### Scenario: dry run does not create GitHub Release
+- **GIVEN** `dry_run: true`
+- **WHEN** the release step runs
+- **THEN** `gh release create` is NOT called
+- **AND** a log message shows what would have been created
