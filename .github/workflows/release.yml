@@ -50,6 +50,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       # OIDC trusted publishing: id-token: write permission lets the runner
       # generate an OIDC token. npm CLI detects the OIDC environment and
