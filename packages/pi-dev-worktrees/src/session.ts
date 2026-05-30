@@ -23,6 +23,8 @@ export interface WorktreesState {
      * non-transparent mount (e.g. /workspaces/<name> instead of the host path).
      */
     remoteWorkspaceFolder?: string;
+    /** Container ID of the running devcontainer (short or full). */
+    containerId?: string;
   };
 }
 

@@ -12,6 +12,7 @@ vi.mock("../src/devcontainer.js", () => ({
   tailContainerLog: vi.fn().mockReturnValue("log output"),
   readStartupOutcome: vi.fn().mockReturnValue({ outcome: null }),
   findDevcontainerConfig: vi.fn().mockReturnValue("/project/.devcontainer/devcontainer.json"),
+  findContainerIdByLabel: vi.fn(),
   generateOverrideJson: vi.fn(),
   startContainer: vi.fn(),
   stopContainer: vi.fn().mockReturnValue({ stopped: true, containerId: "abc123" }),
@@ -52,6 +53,7 @@ vi.mock("../src/worktrees.js", () => ({
   removeHook: vi.fn(),
   formatHook: vi.fn(),
   listWtpWorktrees: vi.fn().mockReturnValue([]),
+  shellEscapeArg: (s: string) => `'${s.replace(/'/g, "'\\''")}'`,
 }));
 
 vi.mock("../src/config.js", () => ({
@@ -356,6 +358,106 @@ describe("devcontainer tool", () => {
     const result = await tool.execute("1", { action: "on" }, null, null, makeMockCtx());
     expect(result.details.ok).toBe(false);
     expect(result.content[0].text).toMatch(/not found/i);
+  });
+
+  it("action=on reuses running container when probe succeeds", async () => {
+    const { probeContainer, readStartupOutcome } = await import("../src/devcontainer.js");
+    vi.mocked(probeContainer).mockReturnValueOnce(true);
+    vi.mocked(readStartupOutcome).mockReturnValueOnce({
+      outcome: "success",
+      containerId: "reused-container-id",
+      remoteWorkspaceFolder: "/workspaces/myrepo",
+    });
+
+    const tool = pi._tools.get("devcontainer")!;
+    const result = await tool.execute("1", { action: "on" }, null, null, makeMockCtx());
+    expect(result.details.ok).toBe(true);
+    expect(result.content[0].text).toMatch(/reusing running container/i);
+    // Should NOT call startContainer when reusing
+    const { startContainer } = await import("../src/devcontainer.js");
+    expect(startContainer).not.toHaveBeenCalled();
+  });
+
+  it("action=stop calls saveState and emits devcontainer stopped", async () => {
+    const { saveState, state } = await import("../src/session.js");
+    const { emitDevcontainerStopped, emitStateUpdate } = await import("../src/dashboard-events.js");
+
+    // Simulate an active devcontainer
+    (state as any).devcontainer = {
+      enabled: true,
+      workspace: "/project",
+      starting: false,
+      containerId: "abc123",
+    };
+
+    const tool = pi._tools.get("devcontainer")!;
+    const result = await tool.execute("1", { action: "stop" }, null, null, makeMockCtx());
+
+    expect(result.details.ok).toBe(true);
+    expect(result.content[0].text).toMatch(/stopped/i);
+    expect(saveState).toHaveBeenCalled();
+    expect(emitDevcontainerStopped).toHaveBeenCalled();
+    expect(emitStateUpdate).toHaveBeenCalled();
+    // State should be disabled after stop
+    expect((state as any).devcontainer.enabled).toBe(false);
+    expect((state as any).devcontainer.starting).toBe(false);
+    expect((state as any).devcontainer.containerId).toBeUndefined();
+    // Log should be cleared
+    const { clearStartupLog } = await import("../src/devcontainer.js");
+    expect(clearStartupLog).toHaveBeenCalled();
+  });
+
+  it("action=stop returns error when stopContainer fails", async () => {
+    const { stopContainer } = await import("../src/devcontainer.js");
+    vi.mocked(stopContainer).mockReturnValueOnce({ stopped: false });
+
+    const tool = pi._tools.get("devcontainer")!;
+    const result = await tool.execute("1", { action: "stop" }, null, null, makeMockCtx());
+    expect(result.details.ok).toBe(false);
+    expect(result.content[0].text).toMatch(/failed/i);
+  });
+});
+
+// ── /devcontainer command: stop sub-command ──────────────────────────────
+
+describe("/devcontainer command — stop sub-command", () => {
+  it("saves state and emits devcontainer stopped on success", async () => {
+    const { saveState, state } = await import("../src/session.js");
+    const { emitDevcontainerStopped, emitStateUpdate } = await import("../src/dashboard-events.js");
+
+    (state as any).devcontainer = {
+      enabled: true,
+      workspace: "/project",
+      starting: false,
+      containerId: "abc123",
+    };
+
+    const cmd = pi._commands.get("devcontainer")!;
+    const ctx = makeMockCtx();
+    await cmd.handler("stop", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("stopped"),
+      "info",
+    );
+    expect(saveState).toHaveBeenCalled();
+    expect(emitDevcontainerStopped).toHaveBeenCalled();
+    expect(emitStateUpdate).toHaveBeenCalled();
+    expect((state as any).devcontainer.enabled).toBe(false);
+  });
+
+  it("notifies warning when stopContainer fails", async () => {
+    const { stopContainer } = await import("../src/devcontainer.js");
+    vi.mocked(stopContainer).mockReturnValueOnce({ stopped: false });
+
+    const cmd = pi._commands.get("devcontainer")!;
+    const ctx = makeMockCtx();
+    await cmd.handler("stop", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Failed"),
+      "warning",
+    );
   });
 });
 

@@ -217,6 +217,16 @@ export function createOrTargetWorktree(
       ? ["add", branch]
       : ["add", "-b", branch];
 
+    // If branch exists only on remote, create a local tracking branch first
+    if (remoteExists && !localExists) {
+      try {
+        execSync(`git fetch origin ${shellEscapeArg(branch)}`, { cwd: projectRoot, encoding: "utf8" });
+      } catch { /* ignore */ }
+      try {
+        execSync(`git branch --track ${shellEscapeArg(branch)} origin/${branch}`, { cwd: projectRoot, encoding: "utf8" });
+      } catch { /* ignore — may already exist */ }
+    }
+
     const result = spawnSync("wtp", wtpArgs, {
       cwd: projectRoot,
       encoding: "utf8",
@@ -228,6 +238,22 @@ export function createOrTargetWorktree(
       throw new Error(`wtp add failed: ${hookOutput}`);
     }
   }
+
+  // Align existing worktree HEAD with requested branch if it differs
+  try {
+    if (existsSync(worktreePath)) {
+      const head = execSync("git rev-parse --abbrev-ref HEAD", { cwd: worktreePath, encoding: "utf8" }).trim();
+      if (head && head !== branch) {
+        try {
+          execSync(`git switch ${shellEscapeArg(branch)}`, { cwd: worktreePath, encoding: "utf8" });
+          hookOutput += (hookOutput ? "\n" : "") + `Switched worktree HEAD from '${head}' to '${branch}'.`;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          hookOutput += (hookOutput ? "\n" : "") + `Warning: worktree at '${worktreePath}' is on '${head}', expected '${branch}'. Failed to switch: ${msg}`;
+        }
+      }
+    }
+  } catch { /* best-effort */ }
 
   // Ensure the worktree root is in .gitignore (only for relative paths under projectRoot)
   const relEntry = worktreeRoot.startsWith("/") ? null : worktreeRoot.replace(/\/*$/, "/");
@@ -299,7 +325,7 @@ export function listWtpWorktrees(
 /**
  * Append a pattern to .gitignore if not already present.
  */
-function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
+export function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
   const gitignorePath = join(projectRoot, ".gitignore");
   let existing = "";
 
@@ -318,6 +344,6 @@ function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
 /**
  * Simple shell argument escaping (single-quote wrapping).
  */
-function shellEscapeArg(s: string): string {
+export function shellEscapeArg(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }

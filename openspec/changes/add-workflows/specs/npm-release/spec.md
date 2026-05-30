@@ -45,16 +45,16 @@ If tests fail, the workflow SHALL abort without publishing.
 
 ### Requirement: Release workflow SHALL create git tags
 
-For each released package, the workflow SHALL run `npm version <bump> --workspace=<pkg>`
-which creates a git tag (e.g., `pi-dev-worktrees-v0.2.1`) and commits the version bump.
-The commit and tag SHALL be pushed back to the repository.
+For each released package, the workflow SHALL bump the version with
+`npm version --no-git-tag-version`, then create a manual git tag in the
+format `v<version>` (e.g., `v0.2.1`) and push both the commit and tag.
 
 #### Scenario: git tag created
 - **GIVEN** `pi-dev-worktrees` is at version `0.2.0`
 - **AND** `version_bump: patch` is selected
-- **WHEN** `npm version patch --workspace=packages/pi-dev-worktrees` runs
-- **THEN** a commit is created with message `0.2.1`
-- **AND** a tag `pi-dev-worktrees-v0.2.1` is created
+- **WHEN** the release step runs
+- **THEN** a commit is created with message `pi-dev-worktrees v0.2.1`
+- **AND** a tag `v0.2.1` is created
 - **AND** both are pushed to the remote
 
 ---
@@ -88,3 +88,25 @@ Version bumps SHALL NOT be committed or pushed in dry-run mode.
 - **WHEN** the workflow reaches the publish step
 - **THEN** `npm publish --dry-run` is used instead
 - **AND** no git changes are pushed
+
+---
+
+### Requirement: Release workflow SHALL create a GitHub Release
+
+After publishing each package, the workflow SHALL create a GitHub Release
+from the new tag using `gh release create` with auto-generated release notes
+(`--generate-notes`). This makes each npm release discoverable on the GitHub
+Releases page.
+
+#### Scenario: GitHub Release created after publish
+- **GIVEN** `pi-dev-worktrees` is published to npm
+- **AND** a git tag exists for the new version
+- **WHEN** the release step completes
+- **THEN** a GitHub Release is created from the tag
+- **AND** release notes are auto-generated from merged pull requests
+
+#### Scenario: dry run does not create GitHub Release
+- **GIVEN** `dry_run: true`
+- **WHEN** the release step runs
+- **THEN** `gh release create` is NOT called
+- **AND** a log message shows what would have been created

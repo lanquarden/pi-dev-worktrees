@@ -21,7 +21,7 @@
  */
 
 import { join } from "node:path";
-import { probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
+import { findContainerIdByLabel, probeContainer, tailContainerLog, readStartupOutcome } from "./devcontainer.js";
 import type { WorktreesState } from "./session.js";
 
 /** Timeout in ms after which a still-starting container is considered stuck. */
@@ -46,6 +46,8 @@ export interface InterceptResult {
   routing: BashRouting;
   /** Container ID when routing === "container" (short 12-char form) */
   containerId?: string;
+  /** Working directory prepended to the command (worktree path or container workspace) */
+  cwd?: string;
 }
 
 /**
@@ -185,7 +187,7 @@ export async function applyBashIntercept(
   if (dc?.enabled && !dc.starting) {
     // Check the startup log first before attempting a slow exec probe.
     // If devcontainer up reported success, trust it and wrap immediately.
-    const { outcome, containerId, remoteWorkspaceFolder: logRemoteWorkspace } = readStartupOutcome(projectRoot);
+    const { outcome, containerId: logContainerId, remoteWorkspaceFolder: logRemoteWorkspace } = readStartupOutcome(projectRoot);
     const alive = outcome === "success" || probeContainer(projectRoot);
     if (!alive) {
       const msg = containerNotReadyMessage(projectRoot, dc.startedAt);
@@ -199,9 +201,11 @@ export async function applyBashIntercept(
     // saved updated state (e.g. session restored from disk, or first command
     // immediately after container-ready notification).
     const containerWorkspace = dc.remoteWorkspaceFolder ?? logRemoteWorkspace ?? hostWorkspace;
+    const effectiveContainerId = dc.containerId ?? logContainerId ?? findContainerIdByLabel(projectRoot);
 
     // Build the inner command, cd-guarded so path failures are visible.
     let inner: string;
+    let containerCwd: string;
     if (state.worktree?.path) {
       // Map worktree host path → container-side path by replacing the host
       // workspace prefix with the container workspace prefix.
@@ -211,10 +215,12 @@ export async function applyBashIntercept(
       const containerWorktreePath = relative
         ? containerWorkspace + relative
         : state.worktree.path; // fallback: hope paths already match
+      containerCwd = containerWorktreePath;
       inner = cdSafe(containerWorktreePath, cmd);
     } else {
       // No worktree: run at the container workspace root.
       // cdSafe ensures we get a clear error if the mount is wrong.
+      containerCwd = containerWorkspace;
       inner = cdSafe(containerWorkspace, cmd);
     }
 
@@ -238,16 +244,17 @@ export async function applyBashIntercept(
     // the override's workspaceFolder and the actual mount in the container
     // (e.g. when a pre-existing container started with a different config is
     // reused by devcontainer up).
-    if (containerId) {
+    if (effectiveContainerId) {
       return {
         command: (
           displayComment +
           `devcontainer exec` +
-          ` --container-id ${shellQuote(containerId)}` +
+          ` --container-id ${shellQuote(effectiveContainerId)}` +
           ` -- sh -c '${innerEscaped}'`
         ),
         routing: "container",
-        containerId: containerId.slice(0, 12),
+        containerId: effectiveContainerId.slice(0, 12),
+        cwd: containerCwd,
       };
     }
 
@@ -261,12 +268,13 @@ export async function applyBashIntercept(
         ` -- sh -c '${innerEscaped}'`
       ),
       routing: "container",
+      cwd: containerCwd,
     };
   }
 
   // Rule 5: worktree active — cd to worktree with failure guard
   if (state.worktree?.path) {
-    return { command: cdSafe(state.worktree.path, cmd), routing: "host" };
+    return { command: cdSafe(state.worktree.path, cmd), routing: "host", cwd: state.worktree.path };
   }
 
   // Rule 6: pass through unchanged

@@ -1,6 +1,6 @@
 # Proposal: Add CI/CD Workflows
 
-**Status:** In Progress
+**Status:** Implemented
 **Date:** 2026-05-23
 
 ---
@@ -19,9 +19,9 @@ The monorepo has two publishable npm packages (`@lanquarden/pi-dev-worktrees` an
 
 Add two GitHub Actions workflows:
 
-1. **`test.yml`** — Runs on every push to `main` and every pull request. Executes `npm ci` and `npm test --workspaces` in a matrix across both packages, confirming all tests pass before merge.
+1. **`test.yml`** — Runs on every push to `main` and every pull request. Executes `npm ci` and `npm test --workspaces`, confirming all tests pass before merge.
 
-2. **`release.yml`** — Triggered manually (`workflow_dispatch`) with inputs for which package(s) to release and what version bump (patch/minor/major). It runs tests first, then bumps the version with `npm version`, tags the commit, pushes, and publishes to npm with `--access public`.
+2. **`release.yml`** — Triggered manually (`workflow_dispatch`) with inputs for which package(s) to release and what version bump (patch/minor/major). It runs tests first, then bumps the version, creates a `v<version>` git tag, pushes, publishes to npm with `--access public`, and creates a GitHub Release with auto-generated notes.
 
 ## What Changes
 

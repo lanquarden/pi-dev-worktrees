@@ -51,10 +51,10 @@ npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
 - **`/worktree remove <branch>`** — remove a worktree (prompts for confirmation)
 - **`/worktree init`** — interactively create `.wtp.yml`
 - **`/worktree hooks [show | add <cmd> | remove <n> | clear]`** — manage post-create hooks in `.wtp.yml`
-- **`/devcontainer [on | off | rebuild | logs]`** — target the project devcontainer; `rebuild` forces `--no-cache`
+- **`/devcontainer [on | off | stop | rebuild | logs]`** — target the project devcontainer; `rebuild` forces `--no-cache`. `off` disables targeting in this session without stopping the container; `stop` stops the container.
 - **LLM tools** (`worktree`, `devcontainer`) — same operations callable by the LLM as tools in a single turn:
   - `worktree` — `action`: `"set"` (branch required) | `"remove"` (branch required) | `"off"` | `"prune"` | `"status"`
-  - `devcontainer` — `action`: `"on"` | `"off"` | `"rebuild"` | `"logs"`
+  - `devcontainer` — `action`: `"on"` | `"off"` | `"stop"` | `"rebuild"` | `"logs"`
 
 ### Per-repo Config
 
@@ -90,15 +90,20 @@ Config is loaded once at `session_start`. Restart the pi session to apply change
 On `/worktree feature/auth` (or `/worktree set feature/auth`), the extension:
 1. Auto-generates `.wtp.yml` at the project root (if absent)
 2. Runs `wtp add feature/auth` (or `wtp add -b feature/auth` for new branches)
-3. Prefixes all subsequent bash tool calls with `cd <worktree-path> &&`
+3. If the worktree already exists, **auto-switches its HEAD** to match the requested branch (recovering from detached HEAD or stale branch)
+4. Prefixes all subsequent bash tool calls with `cd <worktree-path> &&`
+5. Routes file tools (read/write/edit) with relative paths to the active worktree (absolute paths untouched)
 
 #### Devcontainer
 
 On `/devcontainer on`, the extension:
 1. Generates `.pi/devcontainer.override.json` that mounts the project at the same absolute path inside the container
-2. Probes the container with `devcontainer exec ... -- echo ok`; if not running, spawns `devcontainer up` in the background
-3. Wraps all bash tool calls with `devcontainer exec --workspace-folder <root> --override-config .pi/devcontainer.override.json -- sh -c '...'`
+2. Probes for an existing running container; if found, **reuses it** instead of restarting (container ID resolved from the startup log or Docker label)
+3. If no container responds, spawns `devcontainer up` in the background
+4. Wraps all bash tool calls with `devcontainer exec` inside the container
 
+Use `/devcontainer stop` to stop the container entirely (clears log, persists state, emits events).
+Use `/devcontainer off` to just disable targeting in this session *without* stopping the container — other sessions may still be using it.
 Use `/devcontainer rebuild` when the `Dockerfile` or base image has changed — it passes `--no-cache` to force a full image rebuild.
 
 #### Composition
@@ -137,7 +142,15 @@ State (active branch, container status) is persisted to the pi session file via 
 
 ## Dashboard Plugin
 
-The dashboard plugin is optional. It adds worktree and devcontainer state to the session card in pi-agent-dashboard.
+The dashboard plugin is optional. It adds worktree and devcontainer state to the session card in pi-agent-dashboard and enhances the bash tool output with dispatch metadata:
+
+- **Session-card badge** — shows active worktree branch and devcontainer status
+- **Enhanced bash renderer** — adds chips showing where each bash command ran:
+  - `CWD` — working directory (when routed to a worktree)
+  - `RTK` — command rewritten by RTK optimizer
+  - `DEV` — executed inside the devcontainer (with container ID)
+  - `HOST` — executed on host despite devcontainer being active (git/gh/find, `HOST:` prefix)
+  - `error` — container not ready / startup failed
 
 ```bash
 npm install @lanquarden/pi-dev-worktrees-dashboard-plugin
@@ -174,6 +187,8 @@ When devcontainer routing is active, rewritten commands (e.g. `| rtk compress`) 
   "postCreateCommand": "cp $(which rtk) /usr/local/bin/rtk"
 }
 ```
+
+If `rtk` is *not* installed in the container, `pi-dev-worktrees` automatically falls back to the original LLM command (pre-RTK rewrite) so the container doesn't fail with `rtk: command not found`. The dashboard renderer still shows the `RTK` chip indicating a rewrite was attempted.
 
 ---
 

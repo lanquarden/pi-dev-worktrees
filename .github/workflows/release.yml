@@ -70,21 +70,33 @@ jobs:
       - name: Release pi-dev-worktrees
         if: ${{ inputs.package == 'pi-dev-worktrees' || inputs.package == 'both' }}
         run: |
-          npm version ${{ inputs.version_bump }} --workspace=packages/pi-dev-worktrees
-          git push --follow-tags
+          npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=packages/pi-dev-worktrees
+          NEW_VERSION=$(node -p "require('./packages/pi-dev-worktrees/package.json').version")
+          git add packages/pi-dev-worktrees/package.json
+          git commit -m "pi-dev-worktrees v${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          git push origin HEAD --follow-tags
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --dry-run --workspace=packages/pi-dev-worktrees
+            npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees
+            echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
           else
-            npm publish --workspace=packages/pi-dev-worktrees
+            npm publish --access public --workspace=packages/pi-dev-worktrees
+            gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes
           fi
 
       - name: Release pi-dev-worktrees-dashboard-plugin
         if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
         run: |
-          npm version ${{ inputs.version_bump }} --workspace=packages/pi-dev-worktrees-dashboard-plugin
-          git push --follow-tags
+          npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=packages/pi-dev-worktrees-dashboard-plugin
+          NEW_VERSION=$(node -p "require('./packages/pi-dev-worktrees-dashboard-plugin/package.json').version")
+          git add packages/pi-dev-worktrees-dashboard-plugin/package.json
+          git commit -m "pi-dev-worktrees-dashboard-plugin v${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          git push origin HEAD --follow-tags
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --dry-run --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
           else
-            npm publish --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            npm publish --access public --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes
           fi
