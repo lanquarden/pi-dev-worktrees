@@ -11,9 +11,10 @@ vi.mock("../src/devcontainer.js", () => ({
   probeContainer: vi.fn(),
   tailContainerLog: vi.fn(),
   readStartupOutcome: vi.fn(),
+  findContainerIdByLabel: vi.fn(),
 }));
 
-import { probeContainer, tailContainerLog, readStartupOutcome } from "../src/devcontainer.js";
+import { probeContainer, tailContainerLog, readStartupOutcome, findContainerIdByLabel } from "../src/devcontainer.js";
 import { applyBashIntercept } from "../src/bash-intercept.js";
 import type { WorktreesState } from "../src/session.js";
 import type { BashRouting } from "../src/bash-intercept.js";
@@ -21,6 +22,7 @@ import type { BashRouting } from "../src/bash-intercept.js";
 const probe = probeContainer as ReturnType<typeof vi.fn>;
 const tail = tailContainerLog as ReturnType<typeof vi.fn>;
 const startupOutcome = readStartupOutcome as ReturnType<typeof vi.fn>;
+const findLabel = findContainerIdByLabel as ReturnType<typeof vi.fn>;
 
 const ROOT = "/project";
 
