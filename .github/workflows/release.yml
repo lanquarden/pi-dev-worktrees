@@ -70,6 +70,8 @@ jobs:
 
       - name: Release pi-dev-worktrees
         if: ${{ inputs.package == 'pi-dev-worktrees' || inputs.package == 'both' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=packages/pi-dev-worktrees
           NEW_VERSION=$(node -p "require('./packages/pi-dev-worktrees/package.json').version")
@@ -88,6 +90,8 @@ jobs:
 
       - name: Release pi-dev-worktrees-dashboard-plugin
         if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=packages/pi-dev-worktrees-dashboard-plugin
           NEW_VERSION=$(node -p "require('./packages/pi-dev-worktrees-dashboard-plugin/package.json').version")
