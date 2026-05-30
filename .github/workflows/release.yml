@@ -52,16 +52,17 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # OIDC trusted publishing: id-token: write permission lets the runner
-      # generate an OIDC token that npm CLI exchanges automatically for a
-      # short-lived publish token. No NODE_AUTH_TOKEN or NPM_TOKEN needed.
-      # NOTE: Do NOT set registry-url on setup-node — it writes _authToken
-      # to .npmrc which breaks the OIDC flow. Set registry explicitly instead.
+      # generate an OIDC token. setup-node with registry-url writes an
+      # _authToken line to .npmrc that blocks the OIDC flow — strip it.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          registry-url: 'https://registry.npmjs.org/'
           cache: npm
 
-      - run: npm config set registry https://registry.npmjs.org/
+      # Remove _authToken from .npmrc so npm CLI uses OIDC instead of a
+      # (possibly empty) token. The registry URL itself is preserved.
+      - run: npm config delete //registry.npmjs.org/:_authToken
 
       - run: npm ci
 
