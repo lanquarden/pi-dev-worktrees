@@ -1,6 +1,6 @@
 {
   "name": "@lanquarden/pi-dev-worktrees-dashboard-plugin",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "pi-agent-dashboard plugin for pi-dev-worktrees — session-card badge showing active worktree and devcontainer state",
   "license": "MIT",
   "keywords": [
