@@ -1,6 +1,6 @@
 {
   "name": "@lanquarden/pi-dev-worktrees",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Pi extension for isolated branch workspaces — git worktrees via wtp and optional devcontainer targeting",
   "license": "MIT",
   "keywords": [
