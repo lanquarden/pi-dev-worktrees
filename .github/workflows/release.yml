@@ -101,6 +101,10 @@ jobs:
             gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes || echo "Release may already exist"
           fi
 
+      - name: Build dashboard plugin
+        if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
+        run: npm run build --workspace=packages/pi-dev-worktrees-dashboard-plugin
+
       - name: Release pi-dev-worktrees-dashboard-plugin
         if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
         env:

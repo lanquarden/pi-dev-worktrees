@@ -59,6 +59,7 @@
   "scripts": {
     "build": "rspack build",
     "dev": "rspack serve",
+    "prepublishOnly": "npm run build",
     "test": "HOME=$(mktemp -d) vitest run",
     "test:watch": "HOME=$(mktemp -d) vitest"
   },
