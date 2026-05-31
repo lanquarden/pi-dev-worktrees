@@ -32,6 +32,8 @@
   },
   "files": [
     "src/",
+    "dist/",
+    "dashboard-plugin.json",
     "README.md"
   ],
   "pi-dashboard-plugin": {
@@ -39,6 +41,7 @@
     "displayName": "pi-dev-worktrees Workspace",
     "priority": 100,
     "client": "./src/client/index.tsx",
+    "mfRemote": "./dist/remoteEntry.js",
     "claims": [
       {
         "slot": "session-card-badge",
@@ -54,6 +57,8 @@
     ]
   },
   "scripts": {
+    "build": "rspack build",
+    "dev": "rspack serve",
     "test": "HOME=$(mktemp -d) vitest run",
     "test:watch": "HOME=$(mktemp -d) vitest"
   },
@@ -66,6 +71,8 @@
     "@blackbelt-technology/pi-dashboard-shared": "^0.5.3"
   },
   "devDependencies": {
+    "@rspack/cli": "^1.7.0",
+    "@rspack/core": "^1.7.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
