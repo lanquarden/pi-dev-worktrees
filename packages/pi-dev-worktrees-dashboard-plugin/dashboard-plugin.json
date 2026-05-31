@@ -1,0 +1,17 @@
+{
+  "id": "pi-dev-worktrees",
+  "displayName": "pi-dev-worktrees Workspace",
+  "priority": 100,
+  "mfRemote": "./dist/remoteEntry.js",
+  "claims": [
+    {
+      "slot": "session-card-badge",
+      "component": "PiDevWorktreesBadge"
+    },
+    {
+      "slot": "tool-renderer",
+      "toolName": "bash",
+      "component": "EnhancedBashToolRenderer"
+    }
+  ]
+}
