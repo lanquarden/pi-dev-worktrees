@@ -1,18 +1,10 @@
-name: Release to npm
+name: Release to npm (lockstep)
 
 on:
   workflow_dispatch:
     inputs:
-      package:
-        description: Package to release
-        required: true
-        type: choice
-        options:
-          - pi-dev-worktrees
-          - pi-dev-worktrees-dashboard-plugin
-          - both
       version_bump:
-        description: Version bump
+        description: Version bump (applies to both packages)
         required: true
         type: choice
         options:
@@ -63,77 +55,68 @@ jobs:
 
       - run: npm ci
 
+      - name: Ensure up-to-date main (rebase/reset to origin/main)
+        run: |
+          git fetch origin --tags
+          git checkout main
+          git reset --hard origin/main
+
+      - name: Build dashboard plugin
+        run: npm run build --workspace=packages/pi-dev-worktrees-dashboard-plugin
+
+      - name: Compute next version (lockstep)
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Make sure we base the bump on the latest remote tag
+          git fetch --tags origin
+          LAST_TAG=$(git tag --list 'v*' | sort -V | tail -n1)
+          if [ -z "$LAST_TAG" ]; then BASE="0.0.0"; else BASE="${LAST_TAG#v}"; fi
+          IFS='.' read -r MA MI PA <<< "$BASE"
+          case "${{ inputs.version_bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+            *) echo "Invalid bump"; exit 1 ;;
+          esac
+          NEXT_VERSION="$MA.$MI.$PA"
+          echo "NEXT_VERSION=$NEXT_VERSION" | tee -a "$GITHUB_ENV"
+          echo "Base: $BASE  ->  Next: $NEXT_VERSION"
+
+      - name: Update package versions with npm (lockstep)
+        env:
+          NEXT_VERSION: ${{ env.NEXT_VERSION }}
+        run: |
+          npm version "$NEXT_VERSION" --no-git-tag-version --workspace=packages/pi-dev-worktrees
+          npm version "$NEXT_VERSION" --no-git-tag-version --workspace=packages/pi-dev-worktrees-dashboard-plugin
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Release pi-dev-worktrees
-        if: ${{ inputs.package == 'pi-dev-worktrees' || inputs.package == 'both' }}
+      - name: Commit and tag
         env:
+          NEXT_VERSION: ${{ env.NEXT_VERSION }}
+        run: |
+          git add packages/pi-dev-worktrees/package.json packages/pi-dev-worktrees-dashboard-plugin/package.json
+          git commit -m "release v$NEXT_VERSION" || echo "Nothing to commit"
+          git tag -f -a "v$NEXT_VERSION" -m "release v$NEXT_VERSION"
+          git push origin HEAD
+          git push origin "v$NEXT_VERSION"
+
+      - name: Publish packages to npm (lockstep)
+        env:
+          NEXT_VERSION: ${{ env.NEXT_VERSION }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          PKG_DIR="packages/pi-dev-worktrees"
-          PKG_NAME="@lanquarden/pi-dev-worktrees"
-
-          # Bump version
-          npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=${PKG_DIR}
-          NEW_VERSION=$(node -p "require('./${PKG_DIR}/package.json').version")
-
-          # Skip if this version already published to npm (idempotent re-run)
-          if npm view "${PKG_NAME}@${NEW_VERSION}" version >/dev/null 2>&1; then
-            echo "${PKG_NAME}@${NEW_VERSION} already published, skipping"
-            exit 0
-          fi
-
-          # Commit and tag (force tag to handle re-runs where tag exists from failed push)
-          git add ${PKG_DIR}/package.json
-          git commit -m "pi-dev-worktrees v${NEW_VERSION}" || echo "Nothing to commit"
-          git tag -f -a "v${NEW_VERSION}" -m "pi-dev-worktrees v${NEW_VERSION}"
-          git push origin HEAD
-          git push origin "v${NEW_VERSION}"
-
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --dry-run --access public --workspace=${PKG_DIR}
-            echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
+            npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees
+            npm publish --dry-run --access public --workspace=packages/pi-dev-worktrees-dashboard-plugin
+            echo "Would create GitHub release v$NEXT_VERSION"
           else
-            (cd ${PKG_DIR} && npm publish --access public)
-            gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes || echo "Release may already exist"
-          fi
-
-      - name: Build dashboard plugin
-        if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
-        run: npm run build --workspace=packages/pi-dev-worktrees-dashboard-plugin
-
-      - name: Release pi-dev-worktrees-dashboard-plugin
-        if: ${{ inputs.package == 'pi-dev-worktrees-dashboard-plugin' || inputs.package == 'both' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PKG_DIR="packages/pi-dev-worktrees-dashboard-plugin"
-          PKG_NAME="@lanquarden/pi-dev-worktrees-dashboard-plugin"
-
-          # Bump version
-          npm version ${{ inputs.version_bump }} --no-git-tag-version --workspace=${PKG_DIR}
-          NEW_VERSION=$(node -p "require('./${PKG_DIR}/package.json').version")
-
-          # Skip if this version already published to npm (idempotent re-run)
-          if npm view "${PKG_NAME}@${NEW_VERSION}" version >/dev/null 2>&1; then
-            echo "${PKG_NAME}@${NEW_VERSION} already published, skipping"
-            exit 0
-          fi
-
-          # Commit and tag (force tag to handle re-runs where tag exists from failed push)
-          git add ${PKG_DIR}/package.json
-          git commit -m "pi-dev-worktrees-dashboard-plugin v${NEW_VERSION}" || echo "Nothing to commit"
-          git tag -f -a "v${NEW_VERSION}" -m "pi-dev-worktrees-dashboard-plugin v${NEW_VERSION}"
-          git push origin HEAD
-          git push origin "v${NEW_VERSION}"
-
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            npm publish --dry-run --access public --workspace=${PKG_DIR}
-            echo "Would create GitHub release: gh release create 'v${NEW_VERSION}' --title 'v${NEW_VERSION}' --generate-notes"
-          else
-            (cd ${PKG_DIR} && npm publish --access public)
-            gh release create "v${NEW_VERSION}" --title "v${NEW_VERSION}" --generate-notes || echo "Release may already exist"
+            (cd packages/pi-dev-worktrees && npm publish --access public)
+            (cd packages/pi-dev-worktrees-dashboard-plugin && npm publish --access public)
+            gh release create "v$NEXT_VERSION" --title "v$NEXT_VERSION" --generate-notes || echo "Release may already exist"
           fi

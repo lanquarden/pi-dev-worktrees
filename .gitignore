@@ -7,6 +7,11 @@ dist/
 # npm pack tarballs
 *.tgz
 
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+
 # Environment files
 .env
 .env.*
