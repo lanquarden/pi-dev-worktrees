@@ -55,6 +55,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Ensure up-to-date main (rebase/reset to origin/main)
+        run: |
+          git fetch origin --tags
+          git checkout main
+          git reset --hard origin/main
+
       - name: Build dashboard plugin
         run: npm run build --workspace=packages/pi-dev-worktrees-dashboard-plugin
 
@@ -63,6 +69,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Make sure we base the bump on the latest remote tag
+          git fetch --tags origin
           LAST_TAG=$(git tag --list 'v*' | sort -V | tail -n1)
           if [ -z "$LAST_TAG" ]; then BASE="0.0.0"; else BASE="${LAST_TAG#v}"; fi
           IFS='.' read -r MA MI PA <<< "$BASE"
@@ -76,12 +84,12 @@ jobs:
           echo "NEXT_VERSION=$NEXT_VERSION" | tee -a "$GITHUB_ENV"
           echo "Base: $BASE  ->  Next: $NEXT_VERSION"
 
-      - name: Update package versions (lockstep)
+      - name: Update package versions with npm (lockstep)
         env:
           NEXT_VERSION: ${{ env.NEXT_VERSION }}
         run: |
-          node -e "const fs=require('fs');const p='packages/pi-dev-worktrees/package.json';const j=JSON.parse(fs.readFileSync(p)); j.version=process.env.NEXT_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
-          node -e "const fs=require('fs');const p='packages/pi-dev-worktrees-dashboard-plugin/package.json';const j=JSON.parse(fs.readFileSync(p)); j.version=process.env.NEXT_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n')"
+          npm version "$NEXT_VERSION" --no-git-tag-version --workspace=packages/pi-dev-worktrees
+          npm version "$NEXT_VERSION" --no-git-tag-version --workspace=packages/pi-dev-worktrees-dashboard-plugin
 
       - name: Configure git
         run: |
