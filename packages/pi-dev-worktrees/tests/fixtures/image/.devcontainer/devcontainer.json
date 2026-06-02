@@ -1,0 +1,4 @@
+{
+  "name": "fixture-image",
+  "image": "alpine:3.19"
+}
