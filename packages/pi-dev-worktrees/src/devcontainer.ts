@@ -87,6 +87,11 @@ export function generateOverrideJson(projectRoot: string, configPath?: string, f
   }
 
   const merged = { ...base, ...WORKSPACE_OVERRIDES };
+
+  // If base devcontainer used the old "build.dockerfile" key, normalize to top-level dockerFile for CLI compatibility
+  if ((merged as any).build && (merged as any).build.dockerfile && !(merged as any).dockerFile) {
+    (merged as any).dockerFile = (merged as any).build.dockerfile;
+  }
   writeFileSync(overridePath, JSON.stringify(merged, null, 2) + "\n", "utf8");
 
   // Add to .gitignore if not present
@@ -284,7 +289,7 @@ export function buildStartArgs(
     overridePath,
   ];
   if (removeExisting) args.push("--remove-existing-container");
-  if (noCache) args.push("--no-cache");
+  if (noCache) args.push("--build-no-cache");
   return args;
 }
 

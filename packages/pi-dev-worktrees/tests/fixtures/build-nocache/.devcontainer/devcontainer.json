@@ -1,0 +1,9 @@
+{
+  "name": "fixture-build-nocache",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "BUILD_NO_CACHE_MARK": "default"
+    }
+  }
+}

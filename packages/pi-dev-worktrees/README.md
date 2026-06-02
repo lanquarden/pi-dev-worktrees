@@ -37,7 +37,7 @@ pi install npm:@lanquarden/pi-dev-worktrees
 | `/devcontainer on` | Start or reuse the devcontainer |
 | `/devcontainer off` | Disable container targeting (leaves container running) |
 | `/devcontainer stop` | Stop the container entirely |
-| `/devcontainer rebuild` | Rebuild the container image (`--no-cache`) |
+| `/devcontainer rebuild` | Rebuild the container image (`--build-no-cache`) |
 | `/devcontainer logs` | Tail the startup log |
 
 See the [repo README](https://github.com/lanquarden/pi-dev-worktrees) for full documentation.
