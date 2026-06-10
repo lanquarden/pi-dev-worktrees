@@ -3,7 +3,7 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { existsSync, writeFileSync, readFileSync, appendFileSync, openSync, closeSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, appendFileSync, openSync, closeSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 /** Fields we always inject into the override to ensure transparent path mounting. */
@@ -92,6 +92,16 @@ export function generateOverrideJson(projectRoot: string, configPath?: string, f
   if ((merged as any).build && (merged as any).build.dockerfile && !(merged as any).dockerFile) {
     (merged as any).dockerFile = (merged as any).build.dockerfile;
   }
+  // Ensure .pi directory exists before writing the override file
+  try {
+    const piDir = join(projectRoot, ".pi");
+    if (!existsSync(piDir)) {
+      mkdirSync(piDir, { recursive: true });
+    }
+  } catch {
+    // Fall through — writeFileSync will throw a clearer ENOENT if mkdir fails
+  }
+
   writeFileSync(overridePath, JSON.stringify(merged, null, 2) + "\n", "utf8");
 
   // Add to .gitignore if not present
