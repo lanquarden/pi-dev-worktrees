@@ -69,6 +69,17 @@ describe("generateOverrideJson", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("creates .pi directory automatically when missing", () => {
+    // Remove the .pi directory created in beforeEach to simulate a fresh repo without .pi/
+    rmSync(join(dir, ".pi"), { recursive: true, force: true });
+    // Should not throw — generateOverrideJson must create .pi/ as needed
+    expect(() => generateOverrideJson(dir)).not.toThrow();
+    const overridePath = join(dir, ".pi", "devcontainer.override.json");
+    const content = readFileSync(overridePath, "utf8");
+    const parsed = JSON.parse(content);
+    expect(parsed.workspaceFolder).toBe("${localWorkspaceFolder}");
+  });
+
   it("without base config: creates override with workspace fields only", () => {
     generateOverrideJson(dir);
     const content = readFileSync(
