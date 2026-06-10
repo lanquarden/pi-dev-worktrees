@@ -16,3 +16,4 @@ dist/
 .env
 .env.*
 !.env.example
+.pi/worktrees/
