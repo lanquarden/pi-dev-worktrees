@@ -14,7 +14,17 @@ export interface RepoEntry {
 }
 
 export interface PluginConfig {
-  repos: RepoEntry[];
+  worktrees?: { enabled?: boolean };
+  devcontainer?: { enabled?: boolean };
+  repos?: RepoEntry[];
+}
+
+export function areWorktreesEnabled(config: PluginConfig | null): boolean {
+  return config?.worktrees?.enabled !== false;
+}
+
+export function isDevcontainerEnabled(config: PluginConfig | null): boolean {
+  return config?.devcontainer?.enabled !== false;
 }
 
 export const CONFIG_PATH = path.join(
@@ -68,7 +78,7 @@ export function resolveWorktreeRoot(
   config: PluginConfig | null,
 ): string {
   if (!config) return ".pi/worktrees";
-  for (const entry of config.repos) {
+  for (const entry of config.repos ?? []) {
     if (matchRepoGlob(entry.repoGlob, remoteUrl)) {
       return entry.worktreeRoot;
     }
@@ -85,7 +95,7 @@ export function resolvePostCreateHooks(
   config: PluginConfig | null,
 ): WtpHook[] {
   if (!config) return [];
-  for (const entry of config.repos) {
+  for (const entry of config.repos ?? []) {
     if (matchRepoGlob(entry.repoGlob, remoteUrl)) {
       return entry.postCreateHooks ?? [];
     }

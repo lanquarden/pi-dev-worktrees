@@ -58,6 +58,8 @@ vi.mock("../src/worktrees.js", () => ({
 
 vi.mock("../src/config.js", () => ({
   loadPluginConfig: vi.fn().mockReturnValue({}),
+  areWorktreesEnabled: vi.fn().mockReturnValue(true),
+  isDevcontainerEnabled: vi.fn().mockReturnValue(true),
   resolveWorktreeRoot: vi.fn().mockReturnValue(".pi/worktrees"),
   resolvePostCreateHooks: vi.fn().mockReturnValue([]),
 }));
@@ -118,6 +120,8 @@ interface MockPi {
   on: ReturnType<typeof vi.fn>;
   getCommands: ReturnType<typeof vi.fn>;
   getContext: ReturnType<typeof vi.fn>;
+  getActiveTools: ReturnType<typeof vi.fn>;
+  setActiveTools: ReturnType<typeof vi.fn>;
   registerCommand: ReturnType<typeof vi.fn>;
   registerTool: ReturnType<typeof vi.fn>;
   ui: { notify: ReturnType<typeof vi.fn>; setStatus: ReturnType<typeof vi.fn> };
@@ -144,6 +148,8 @@ function createMockPi(): MockPi {
     }),
     getCommands: vi.fn().mockReturnValue([]),
     getContext: vi.fn().mockReturnValue(null),
+    getActiveTools: vi.fn().mockReturnValue(["bash", "read", "worktree", "devcontainer"]),
+    setActiveTools: vi.fn(),
     registerCommand: vi.fn((name: string, def: CommandDef) => {
       commands.set(name, def);
     }),
@@ -163,6 +169,9 @@ function createMockPi(): MockPi {
 
 function makeMockCtx() {
   return {
+    cwd: "/project",
+    mode: "rpc",
+    hasUI: true,
     ui: {
       notify: vi.fn(),
       setStatus: vi.fn(),
@@ -180,6 +189,17 @@ let pi: MockPi;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  const config = await import("../src/config.js");
+  const session = await import("../src/session.js");
+  vi.mocked(config.areWorktreesEnabled).mockReturnValue(true);
+  vi.mocked(config.isDevcontainerEnabled).mockReturnValue(true);
+  vi.mocked(config.loadPluginConfig).mockReturnValue({});
+  vi.mocked(session.loadState).mockReturnValue({});
+  const devcontainer = await import("../src/devcontainer.js");
+  vi.mocked(devcontainer.probeContainer).mockReturnValue(false);
+  vi.mocked(devcontainer.readStartupOutcome).mockReturnValue({ outcome: null });
+  vi.mocked(devcontainer.findDevcontainerConfig).mockReturnValue("/project/.devcontainer/devcontainer.json");
+  vi.mocked(devcontainer.stopContainer).mockReturnValue({ stopped: true, containerId: "abc123" });
   execSyncMock.mockImplementation((cmd: string) => {
     if (cmd.includes("rev-parse")) return "/project";
     if (cmd.includes("remote get-url")) return "";
@@ -550,5 +570,212 @@ describe("removed commands", () => {
 
   it("workspace-cleanup command is not registered", () => {
     expect(pi._commands.has("workspace-cleanup")).toBe(false);
+  });
+});
+
+// ── capability gating and external-worktree mode ────────────────────────────
+
+describe("capability gating", () => {
+  it("external mode clears stale worktree state, skips wtp init, and removes the tool", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const worktrees = await import("../src/worktrees.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(config.isDevcontainerEnabled).mockReturnValue(true);
+    vi.mocked(session.loadState).mockReturnValueOnce({ worktree: { branch: "stale", path: "/old/wt" } });
+    vi.mocked(worktrees.ensureWtpYml).mockClear();
+
+    const externalPi = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(externalPi as any);
+    await externalPi._emit("session_start", {}, makeMockCtx());
+
+    expect((session.state as any).worktree).toBeUndefined();
+    expect(session.saveState).toHaveBeenCalled();
+    expect(worktrees.ensureWtpYml).not.toHaveBeenCalled();
+    expect(externalPi.setActiveTools).toHaveBeenCalledWith(["bash", "read", "devcontainer"]);
+  });
+
+  it("makes every external-mode worktree command/tool invocation explanatory and non-mutating", async () => {
+    const config = await import("../src/config.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    const externalPi = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(externalPi as any);
+    await externalPi._emit("session_start", {}, makeMockCtx());
+    execSyncMock.mockClear();
+
+    const toolResult = await externalPi._tools.get("worktree")!.execute("x", { action: "prune" }, null, null, makeMockCtx());
+    expect(toolResult.content[0].text).toMatch(/externally managed/i);
+    const ctx = makeMockCtx();
+    await externalPi._commands.get("worktree")!.handler("set feature/x", ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/externally managed/i), "info");
+    expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("external mode keeps relative file-tool paths untouched despite stale restored state", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({ worktree: { branch: "stale", path: "/old/wt" } });
+    const externalPi = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(externalPi as any);
+    await externalPi._emit("session_start", {}, makeMockCtx());
+    const event = { toolName: "read", toolCallId: "r", input: { path: "README.md" } };
+    await externalPi._emit("tool_call", event, makeMockCtx());
+    expect(event.input.path).toBe("README.md");
+  });
+
+  it("disabled devcontainers clear restored state without lifecycle calls and remove the tool", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.isDevcontainerEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({ devcontainer: { enabled: true, workspace: "/old" } });
+    const disabledPi = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(disabledPi as any);
+    await disabledPi._emit("session_start", {}, makeMockCtx());
+
+    expect((session.state as any).devcontainer).toBeUndefined();
+    expect(devcontainer.stopContainer).not.toHaveBeenCalled();
+    expect(devcontainer.probeContainer).not.toHaveBeenCalled();
+    expect(devcontainer.startContainer).not.toHaveBeenCalled();
+    expect(disabledPi.setActiveTools).toHaveBeenCalledWith(["bash", "read", "worktree"]);
+    const result = await disabledPi._tools.get("devcontainer")!.execute("x", { action: "on" }, null, null, makeMockCtx());
+    expect(result.content[0].text).toMatch(/disabled by config/i);
+  });
+
+  it("roots external-mode devcontainer operations at the exact session cwd below Git root", async () => {
+    const config = await import("../src/config.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(config.isDevcontainerEnabled).mockReturnValue(true);
+    const externalPi = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(externalPi as any);
+    const ctx = makeMockCtx();
+    ctx.cwd = "/project/packages/api";
+    await externalPi._emit("session_start", {}, ctx);
+    const result = await externalPi._tools.get("devcontainer")!.execute("x", { action: "on" }, null, null, ctx);
+    expect(result.details.ok).toBe(true);
+    expect(devcontainer.findDevcontainerConfig).toHaveBeenCalledWith("/project/packages/api");
+    expect(devcontainer.generateOverrideJson).toHaveBeenCalledWith(
+      "/project/packages/api",
+      expect.any(String),
+      true,
+      "/project",
+    );
+    expect(devcontainer.startContainer).toHaveBeenCalledWith(
+      "/project/packages/api",
+      true,
+      false,
+      "/project",
+    );
+  });
+});
+
+
+describe("restored devcontainer reconciliation", () => {
+  it("retargets a differently rooted restored container without stopping the old root", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({
+      devcontainer: { enabled: true, workspace: "/project/old", starting: false },
+    });
+    vi.mocked(devcontainer.stopContainer).mockClear();
+    vi.mocked(devcontainer.startContainer).mockClear();
+    const p = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(p as any);
+    const ctx = makeMockCtx();
+    ctx.cwd = "/project/current";
+    await p._emit("session_start", {}, ctx);
+
+    expect(devcontainer.stopContainer).not.toHaveBeenCalled();
+    expect(devcontainer.startContainer).toHaveBeenCalledWith("/project/current", false, false, "/project");
+    expect((session.state as any).devcontainer).toMatchObject({
+      enabled: true,
+      workspace: "/project/current",
+      starting: true,
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/current session cwd/i), "info");
+  });
+
+  it("stops and recreates a current-root container with a mismatched mount", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({
+      devcontainer: {
+        enabled: true,
+        workspace: "/project/current",
+        starting: false,
+        remoteWorkspaceFolder: "/workspaces/wrong",
+      },
+    });
+    vi.mocked(devcontainer.stopContainer).mockClear();
+    vi.mocked(devcontainer.startContainer).mockClear();
+    const p = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(p as any);
+    const ctx = makeMockCtx();
+    ctx.cwd = "/project/current";
+    await p._emit("session_start", {}, ctx);
+
+    expect(devcontainer.stopContainer).toHaveBeenCalledWith("/project/current");
+    expect(devcontainer.generateOverrideJson).toHaveBeenCalledWith(
+      "/project/current", expect.any(String), true, "/project",
+    );
+    expect(devcontainer.startContainer).toHaveBeenCalledWith("/project/current", true, false, "/project");
+  });
+
+  it("restarts aligned restored targeting when the current-root container is unresponsive", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({
+      devcontainer: { enabled: true, workspace: "/project/current", starting: false, remoteWorkspaceFolder: "/project/current" },
+    });
+    vi.mocked(devcontainer.probeContainer).mockReturnValue(false);
+    vi.mocked(devcontainer.stopContainer).mockClear();
+    vi.mocked(devcontainer.startContainer).mockClear();
+    const p = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(p as any);
+    const ctx = makeMockCtx();
+    ctx.cwd = "/project/current";
+    await p._emit("session_start", {}, ctx);
+
+    expect(devcontainer.stopContainer).toHaveBeenCalledWith("/project/current");
+    expect(devcontainer.startContainer).toHaveBeenCalledWith("/project/current", true, false, "/project");
+    expect((session.state as any).devcontainer).toMatchObject({ workspace: "/project/current", starting: true });
+  });
+
+  it("disables reconciled targeting with the normal diagnostic when config is missing", async () => {
+    const config = await import("../src/config.js");
+    const session = await import("../src/session.js");
+    const devcontainer = await import("../src/devcontainer.js");
+    vi.mocked(config.areWorktreesEnabled).mockReturnValue(false);
+    vi.mocked(session.loadState).mockReturnValueOnce({
+      devcontainer: { enabled: true, workspace: "/project/old", starting: false },
+    });
+    vi.mocked(devcontainer.findDevcontainerConfig).mockReturnValue(null);
+    vi.mocked(devcontainer.startContainer).mockClear();
+    const p = createMockPi();
+    const { default: register } = await import("../src/index.js");
+    register(p as any);
+    const ctx = makeMockCtx();
+    ctx.cwd = "/project/current";
+    await p._emit("session_start", {}, ctx);
+
+    expect((session.state as any).devcontainer).toBeUndefined();
+    expect(devcontainer.startContainer).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/No \.devcontainer/i), "warning");
   });
 });

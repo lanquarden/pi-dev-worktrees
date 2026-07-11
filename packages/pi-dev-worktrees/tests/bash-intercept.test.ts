@@ -530,15 +530,10 @@ describe("Rule 4 — exec routing: --container-id vs --workspace-folder", () => 
   });
 });
 
-// ── Rule 4: display comment ──────────────────────────────────────────────────
+// ── Rule 4: executable command contains no presentation metadata ────────────
 
-describe("Rule 4 — display comment shows original command in TUI", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    tail.mockReturnValue("");
-  });
-
-  it("prepends # [container] <cmd> comment when using --container-id", async () => {
+describe("Rule 4 — native rendering stays outside executable command text", () => {
+  it("does not prepend a container display comment", async () => {
     startupOutcome.mockReturnValue({
       outcome: "success",
       containerId: "abc123",
@@ -548,52 +543,9 @@ describe("Rule 4 — display comment shows original command in TUI", () => {
       devcontainer: { enabled: true, workspace: ROOT, starting: false },
     };
     const result = await intercept("uv lock --check", state);
-    expect(result).toMatch(/^# \[container\] uv lock --check\n/);
-  });
-
-  it("prepends # [container] <cmd> comment when falling back to --workspace-folder", async () => {
-    startupOutcome.mockReturnValue({ outcome: null });
-    probe.mockReturnValue(true);
-    const state: WorktreesState = {
-      devcontainer: { enabled: true, workspace: ROOT, starting: false },
-    };
-    const result = await intercept("npm test", state);
-    expect(result).toMatch(/^# \[container\] npm test\n/);
-  });
-
-  it("comment uses the ORIGINAL command, not the wrapped exec form", async () => {
-    startupOutcome.mockReturnValue({
-      outcome: "success",
-      containerId: "abc123",
-      remoteWorkspaceFolder: "/workspaces/myrepo",
-    });
-    const state: WorktreesState = {
-      devcontainer: { enabled: true, workspace: ROOT, starting: false },
-    };
-    const result = await intercept("uv lock --check", state);
-    // Comment shows original, rest shows devcontainer exec
-    const lines = result.split("\n");
-    expect(lines[0]).toBe("# [container] uv lock --check");
-    expect(lines[1]).toContain("devcontainer exec");
-  });
-
-  it("collapses newlines in display comment (multi-line commit message)", async () => {
-    startupOutcome.mockReturnValue({
-      outcome: "success",
-      containerId: "abc123",
-      remoteWorkspaceFolder: "/workspaces/myrepo",
-    });
-    const state: WorktreesState = {
-      devcontainer: { enabled: true, workspace: ROOT, starting: false },
-    };
-    const multilineCmd = `npm run build\n# comment line\necho done`;
-    const result = await intercept(multilineCmd, state);
-    const firstLine = result.split("\n")[0];
-    // The # comment must be a single line — no embedded newlines
-    expect(firstLine.startsWith("# [container]")).toBe(true);
-    expect(firstLine).not.toContain("\n");
-    // Newlines collapsed to spaces in the comment
-    expect(firstLine).toContain("npm run build # comment line echo done");
+    expect(result).toMatch(/^devcontainer exec/);
+    expect(result).not.toContain("# [container]");
+    expect(result).toContain("uv lock --check");
   });
 });
 
