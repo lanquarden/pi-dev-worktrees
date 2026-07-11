@@ -9,10 +9,59 @@
  */
 
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readStartupOutcome } from "./devcontainer.js";
+import type { RtkLoadOrderAdvisoryMode } from "./config.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+/**
+ * Path to the persistent advisory-state marker file.
+ * Used to remember that the rtkLoadOrder advisory has been shown once.
+ */
+export const ADVISORY_STATE_PATH = join(
+  homedir(),
+  ".pi",
+  "agent",
+  "pi-dev-worktrees.advisory-state.json",
+);
+
+export interface AdvisoryState {
+  rtkLoadOrderShownAt?: string;
+}
+
+/**
+ * Read the advisory-state marker file. Returns {} when absent or unreadable.
+ */
+export function readAdvisoryState(
+  statePath: string = ADVISORY_STATE_PATH,
+): AdvisoryState {
+  if (!existsSync(statePath)) return {};
+  try {
+    return JSON.parse(readFileSync(statePath, "utf8")) as AdvisoryState;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Persist that the rtkLoadOrder advisory has been shown. Fire-and-forget;
+ * failure to persist is non-fatal (it just means the advisory may repeat).
+ */
+export function markRtkLoadOrderShown(
+  statePath: string = ADVISORY_STATE_PATH,
+): void {
+  try {
+    writeFileSync(
+      statePath,
+      JSON.stringify({ rtkLoadOrderShownAt: new Date().toISOString() }, null, 2),
+      "utf8",
+    );
+  } catch {
+    /* non-fatal */
+  }
+}
 
 /**
  * Inspect loaded extensions for known incompatible or misconfigured RTK setups.
@@ -20,10 +69,28 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
  *
  * Called at session_start after project root is resolved.
  */
+export interface DetectRtkConflictsOptions {
+  /**
+   * Controls the pi-rtk-optimizer load-order info advisory (Check B):
+   *   - "once"   (default) show only once per machine, then suppress
+   *   - "always" show every session (legacy)
+   *   - "off"    never show
+   * Does NOT affect Check A conflict warnings, which are always emitted.
+   */
+  rtkLoadOrderMode?: RtkLoadOrderAdvisoryMode;
+  /** Override the advisory-state marker path (for testing). */
+  advisoryStatePath?: string;
+}
+
 export function detectRtkConflicts(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  options: DetectRtkConflictsOptions = {},
 ): void {
+  const rtkLoadOrderMode: RtkLoadOrderAdvisoryMode =
+    options.rtkLoadOrderMode ?? "once";
+  const advisoryStatePath = options.advisoryStatePath ?? ADVISORY_STATE_PATH;
+
   const allTools = pi.getAllTools();
   const bashTool = allTools.find((t) => t.name === "bash");
   const commands = pi.getCommands();
@@ -64,21 +131,31 @@ export function detectRtkConflicts(
     }
   }
 
-  // Check B: pi-rtk-optimizer detected — advisory for load order
+  // Check B: pi-rtk-optimizer detected — advisory for load order.
+  // Gated by advisories.rtkLoadOrder (default "once"): show once per machine.
+  // Check A conflict warnings above are intentionally NOT gated here.
   const hasRtkOptimizer = commands.some((c) => c.name === "rtk");
-  if (hasRtkOptimizer) {
-    ctx.ui.notify(
-      `pi-dev-worktrees: pi-rtk-optimizer detected. ` +
-        `To ensure correct load order (pi-rtk-optimizer mutates commands BEFORE pi-dev-worktrees wraps them), ` +
-        `verify both extensions are listed in the same settings.json "extensions" array with pi-rtk-optimizer first:\n` +
-        `{\n` +
-        `  "extensions": [\n` +
-        `    "/path/to/pi-rtk-optimizer",\n` +
-        `    "/path/to/pi-dev-worktrees"\n` +
-        `  ]\n` +
-        `}`,
-      "info",
-    );
+  if (hasRtkOptimizer && rtkLoadOrderMode !== "off") {
+    const alreadyShown =
+      rtkLoadOrderMode === "once" &&
+      Boolean(readAdvisoryState(advisoryStatePath).rtkLoadOrderShownAt);
+
+    if (!alreadyShown) {
+      ctx.ui.notify(
+        `pi-dev-worktrees: pi-rtk-optimizer detected. ` +
+          `To ensure correct load order (pi-rtk-optimizer mutates commands BEFORE pi-dev-worktrees wraps them), ` +
+          `verify both extensions are listed in the same settings.json "extensions" array with pi-rtk-optimizer first:\n` +
+          `{\n` +
+          `  "extensions": [\n` +
+          `    "/path/to/pi-rtk-optimizer",\n` +
+          `    "/path/to/pi-dev-worktrees"\n` +
+          `  ]\n` +
+          `}\n` +
+          `Set \`advisories.rtkLoadOrder\` to \"off\" in ~/.pi/agent/pi-dev-worktrees.config.json to suppress this message.`,
+        "info",
+      );
+      if (rtkLoadOrderMode === "once") markRtkLoadOrderShown(advisoryStatePath);
+    }
   }
 }
 

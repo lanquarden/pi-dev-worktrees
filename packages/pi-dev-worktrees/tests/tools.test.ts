@@ -62,6 +62,7 @@ vi.mock("../src/config.js", () => ({
   isDevcontainerEnabled: vi.fn().mockReturnValue(true),
   resolveWorktreeRoot: vi.fn().mockReturnValue(".pi/worktrees"),
   resolvePostCreateHooks: vi.fn().mockReturnValue([]),
+  rtkLoadOrderAdvisoryMode: vi.fn().mockReturnValue("once"),
 }));
 
 vi.mock("../src/rtk-compat.js", () => ({
