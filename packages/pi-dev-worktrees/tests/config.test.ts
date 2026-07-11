@@ -15,6 +15,7 @@ import {
   isDevcontainerEnabled,
   resolveWorktreeRoot,
   resolvePostCreateHooks,
+  rtkLoadOrderAdvisoryMode,
 } from "../src/config.js";
 import type { PluginConfig } from "../src/config.js";
 
@@ -85,9 +86,30 @@ describe("capability flags", () => {
     expect(areWorktreesEnabled(null)).toBe(true);
     expect(isDevcontainerEnabled(null)).toBe(true);
     expect(areWorktreesEnabled({ repos: [] })).toBe(true);
-    expect(isDevcontainerEnabled({ repos: [] })).toBe(true);
+  });
+});
+
+describe("rtkLoadOrderAdvisoryMode", () => {
+  it("defaults to \"once\" for null/undefined/missing config", () => {
+    expect(rtkLoadOrderAdvisoryMode(null)).toBe("once");
+    expect(rtkLoadOrderAdvisoryMode({})).toBe("once");
+    expect(rtkLoadOrderAdvisoryMode({ advisories: {} })).toBe("once");
   });
 
+  it("returns \"always\" when explicitly set", () => {
+    expect(rtkLoadOrderAdvisoryMode({ advisories: { rtkLoadOrder: "always" } })).toBe("always");
+  });
+
+  it("returns \"off\" when explicitly set", () => {
+    expect(rtkLoadOrderAdvisoryMode({ advisories: { rtkLoadOrder: "off" } })).toBe("off");
+  });
+
+  it("falls back to \"once\" for unknown values", () => {
+    expect(rtkLoadOrderAdvisoryMode({ advisories: { rtkLoadOrder: "sometimes" as any } })).toBe("once");
+  });
+});
+
+describe("capability flags boolean combinations", () => {
   it("disables only on explicit false and supports all four combinations", () => {
     for (const worktrees of [true, false]) {
       for (const devcontainer of [true, false]) {

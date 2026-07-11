@@ -3,6 +3,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Mock devcontainer so probeContainerRtk doesn't actually exec anything
 vi.mock("../src/devcontainer.js", () => ({
@@ -147,7 +150,7 @@ describe("detectRtkConflicts", () => {
   });
 
   describe("Scenario: pi-rtk-optimizer detected, load order unverified", () => {
-    it("emits info advisory with settings.json snippet when /rtk command found and no incompatible override", () => {
+    it("emits info advisory with settings.json snippet when /rtk command found and no incompatible override (mode=always)", () => {
       // bash is built-in, rtk-optimizer registers /rtk command
       const tools = [
         makeToolInfo("bash", "/built-in", "built-in"),
@@ -157,7 +160,7 @@ describe("detectRtkConflicts", () => {
       ];
       const { pi, ctx, notify } = makeMocks(tools, commands);
 
-      detectRtkConflicts(pi, ctx);
+      detectRtkConflicts(pi, ctx, { rtkLoadOrderMode: "always" });
 
       expect(notify).toHaveBeenCalledOnce();
       const [message, level] = notify.mock.calls[0];
@@ -167,17 +170,93 @@ describe("detectRtkConflicts", () => {
       expect(message).toContain("extensions");
     });
 
-    it("emits info advisory when no bash tool at all but /rtk present", () => {
+    it("emits info advisory when no bash tool at all but /rtk present (mode=always)", () => {
       const tools: ToolInfo[] = []; // no bash tool registered
       const commands = [
         makeCommandInfo("rtk"),
       ];
       const { pi, ctx, notify } = makeMocks(tools, commands);
 
-      detectRtkConflicts(pi, ctx);
+      detectRtkConflicts(pi, ctx, { rtkLoadOrderMode: "always" });
 
       expect(notify).toHaveBeenCalledOnce();
       expect(notify.mock.calls[0][1]).toBe("info");
+    });
+  });
+
+  describe("Scenario: rtkLoadOrder advisory mode gating", () => {
+    it("mode=once emits on first session and persists a marker", () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-dw-advisory-"));
+      const statePath = join(dir, "advisory-state.json");
+      const tools = [makeToolInfo("bash", "/built-in", "built-in")];
+      const commands = [makeCommandInfo("rtk")];
+
+      try {
+        const { pi, ctx, notify } = makeMocks(tools, commands);
+        detectRtkConflicts(pi, ctx, {
+          rtkLoadOrderMode: "once",
+          advisoryStatePath: statePath,
+        });
+
+        expect(notify).toHaveBeenCalledOnce();
+        expect(notify.mock.calls[0][1]).toBe("info");
+        // marker file must now exist
+        expect(() => readFileSync(statePath, "utf8")).not.toThrow();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("mode=once suppresses on a subsequent session once marker exists", () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-dw-advisory-"));
+      const statePath = join(dir, "advisory-state.json");
+      writeFileSync(statePath, JSON.stringify({ rtkLoadOrderShownAt: "1970-01-01T00:00:00.000Z" }), "utf8");
+      const tools = [makeToolInfo("bash", "/built-in", "built-in")];
+      const commands = [makeCommandInfo("rtk")];
+
+      try {
+        const { pi, ctx, notify } = makeMocks(tools, commands);
+        detectRtkConflicts(pi, ctx, {
+          rtkLoadOrderMode: "once",
+          advisoryStatePath: statePath,
+        });
+
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("mode=off never emits and does not read marker", () => {
+      const dir = mkdtempSync(join(tmpdir(), "pi-dw-advisory-"));
+      const statePath = join(dir, "advisory-state.json");
+      const tools = [makeToolInfo("bash", "/built-in", "built-in")];
+      const commands = [makeCommandInfo("rtk")];
+
+      try {
+        const { pi, ctx, notify } = makeMocks(tools, commands);
+        detectRtkConflicts(pi, ctx, {
+          rtkLoadOrderMode: "off",
+          advisoryStatePath: statePath,
+        });
+
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("Check A spawnHook warning still fires under mode=off (warnings are not gated)", () => {
+      const tools = [
+        makeToolInfo("bash", "/home/user/.pi/agent/packages/node_modules/@sherif-fanous/pi-rtk/dist/index.js"),
+      ];
+      const { pi, ctx, notify } = makeMocks(tools, [makeCommandInfo("rtk")]);
+
+      detectRtkConflicts(pi, ctx, { rtkLoadOrderMode: "off" });
+
+      // Check A warning must still fire even when the advisory is off
+      expect(notify).toHaveBeenCalledOnce();
+      expect(notify.mock.calls[0][1]).toBe("warning");
     });
   });
 

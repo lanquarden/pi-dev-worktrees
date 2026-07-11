@@ -33,13 +33,16 @@ pi install npm:@lanquarden/pi-dev-worktrees
 ```json
 {
   "worktrees": { "enabled": false },
-  "devcontainer": { "enabled": true }
+  "devcontainer": { "enabled": true },
+  "advisories": { "rtkLoadOrder": "once" }
 }
 ```
 
 With worktrees disabled, pi's exact session cwd is authoritative. No `.wtp.yml`, `wtp` invocation, worktree/file-path routing, managed-worktree dashboard UI, or worktree tool remains active. Devcontainer discovery, override/log generation, probes, labels, lifecycle calls, and exec routing all use that exact cwd, including non-Git directories. Config changes require `/reload` or a new session runtime.
 
 Set `devcontainer.enabled` to `false` to disable all container side effects, routing, tool exposure, and feedback independently of worktrees.
+
+`advisories.rtkLoadOrder` controls the pi-rtk-optimizer load-order startup info message: `"once"` (default) shows it only once per machine, `"always"` shows it every session, `"off"` suppresses it entirely. Once shown, the marker persists at `~/.pi/agent/pi-dev-worktrees.advisory-state.json`; delete that file to see the advisory again. Conflict warnings (e.g. an incompatible spawnHook-based pi-rtk) are always emitted regardless of this setting.
 
 Generated artifacts are excluded through `git rev-parse --git-path info/exclude`, including linked worktrees and external Git directories. `.gitignore` is preserved byte-for-byte.
 

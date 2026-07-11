@@ -13,9 +13,19 @@ export interface RepoEntry {
   postCreateHooks?: WtpHook[];
 }
 
+export type RtkLoadOrderAdvisoryMode = "once" | "always" | "off";
+
 export interface PluginConfig {
   worktrees?: { enabled?: boolean };
   devcontainer?: { enabled?: boolean };
+  /**
+   * Startup advisory controls. Currently governs the pi-rtk-optimizer
+   * load-order info message emitted at session_start.
+   *   - "once"   (default) show the advisory only once per machine
+   *   - "always" show it every session (legacy behavior)
+   *   - "off"    never show it
+   */
+  advisories?: { rtkLoadOrder?: RtkLoadOrderAdvisoryMode };
   repos?: RepoEntry[];
 }
 
@@ -25,6 +35,17 @@ export function areWorktreesEnabled(config: PluginConfig | null): boolean {
 
 export function isDevcontainerEnabled(config: PluginConfig | null): boolean {
   return config?.devcontainer?.enabled !== false;
+}
+
+/**
+ * Resolve the rtkLoadOrder advisory mode, defaulting to "once".
+ * Unknown / missing values fall back to "once".
+ */
+export function rtkLoadOrderAdvisoryMode(
+  config: PluginConfig | null,
+): RtkLoadOrderAdvisoryMode {
+  const mode = config?.advisories?.rtkLoadOrder;
+  return mode === "always" || mode === "off" ? mode : "once";
 }
 
 export const CONFIG_PATH = path.join(

@@ -41,6 +41,7 @@ import {
   isDevcontainerEnabled,
   resolveWorktreeRoot,
   resolvePostCreateHooks,
+  rtkLoadOrderAdvisoryMode,
 } from "./config.js";
 import {
   findDevcontainerConfig,
@@ -789,7 +790,8 @@ export default function (pi: ExtensionAPI) {
 
     refreshStatus(ctx);
     const rendererInstalled = registerNativeBashRenderer(pi, sessionCwd, ctx);
-    if (ctx.mode !== "tui" || rendererInstalled) detectRtkConflicts(pi, ctx);
+    if (ctx.mode !== "tui" || rendererInstalled)
+      detectRtkConflicts(pi, ctx, { rtkLoadOrderMode: rtkLoadOrderAdvisoryMode(pluginConfig) });
     if (devcontainersEnabled) reconcileRestoredDevcontainer(pi, ctx);
     invalidateDashboardUi(pi);
   });
