@@ -69,6 +69,17 @@ describe("generateOverrideJson", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("creates .pi directory automatically when missing", () => {
+    // Remove the .pi directory created in beforeEach to simulate a fresh repo without .pi/
+    rmSync(join(dir, ".pi"), { recursive: true, force: true });
+    // Should not throw — generateOverrideJson must create .pi/ as needed
+    expect(() => generateOverrideJson(dir)).not.toThrow();
+    const overridePath = join(dir, ".pi", "devcontainer.override.json");
+    const content = readFileSync(overridePath, "utf8");
+    const parsed = JSON.parse(content);
+    expect(parsed.workspaceFolder).toBe("${localWorkspaceFolder}");
+  });
+
   it("without base config: creates override with workspace fields only", () => {
     generateOverrideJson(dir);
     const content = readFileSync(
@@ -431,20 +442,20 @@ describe("buildStartArgs", () => {
     expect(args[args.length - 1]).toBe("--remove-existing-container");
   });
 
-  it("appends --no-cache when noCache=true", () => {
+  it("appends --build-no-cache when noCache=true", () => {
     const args = buildStartArgs(ROOT, OVERRIDE, false, true);
-    expect(args).toContain("--no-cache");
+    expect(args).toContain("--build-no-cache");
   });
 
-  it("does NOT include --no-cache when noCache=false (default)", () => {
+  it("does NOT include --build-no-cache when noCache=false (default)", () => {
     const args = buildStartArgs(ROOT, OVERRIDE, false);
-    expect(args).not.toContain("--no-cache");
+    expect(args).not.toContain("--build-no-cache");
   });
 
-  it("--no-cache appears after --remove-existing-container when both are set", () => {
+  it("--build-no-cache appears after --remove-existing-container when both are set", () => {
     const args = buildStartArgs(ROOT, OVERRIDE, true, true);
     const removeIdx = args.indexOf("--remove-existing-container");
-    const noCacheIdx = args.indexOf("--no-cache");
+    const noCacheIdx = args.indexOf("--build-no-cache");
     expect(removeIdx).toBeGreaterThan(-1);
     expect(noCacheIdx).toBeGreaterThan(removeIdx);
   });

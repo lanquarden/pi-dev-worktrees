@@ -59,7 +59,7 @@ Plain-pi status shows only `container:starting` or `container:on`. TUI bash rows
 | `/devcontainer on` | Start or reuse the devcontainer |
 | `/devcontainer off` | Disable container targeting (leaves container running) |
 | `/devcontainer stop` | Stop the container entirely |
-| `/devcontainer rebuild` | Rebuild the container image (`--no-cache`) |
+| `/devcontainer rebuild` | Rebuild the container image (`--build-no-cache`) |
 | `/devcontainer logs` | Tail the startup log |
 
 When a capability is disabled, its LLM tool is removed. The corresponding slash command remains registered but is explanatory and non-mutating.
