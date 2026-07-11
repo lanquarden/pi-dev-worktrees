@@ -227,17 +227,6 @@ export async function applyBashIntercept(
     // Escape inner for sh -c '...'
     const innerEscaped = inner.replace(/'/g, "'\\''");
 
-    // Prepend a shell comment with the original command so the TUI header shows
-    // something human-readable instead of the full devcontainer exec boilerplate.
-    // The shell ignores comment lines; it has no effect on execution.
-    //
-    // IMPORTANT: collapse newlines to spaces — shell comments only cover a
-    // single line.  A multi-line commit message (e.g. `git commit -m "feat:\n-
-    // ..."`) would otherwise leak subsequent lines out of the comment,
-    // causing the inner shell to parse them as commands and fail with a
-    // syntax error.
-    const displayComment = `# [container] ${cmd.replace(/\n/g, " ")}\n`;
-
     // Prefer --container-id when available — it requires no --workspace-folder
     // or --override-config repetition (all context is baked into the running
     // container), and avoids OCI chdir failures caused by a mismatch between
@@ -247,7 +236,6 @@ export async function applyBashIntercept(
     if (effectiveContainerId) {
       return {
         command: (
-          displayComment +
           `devcontainer exec` +
           ` --container-id ${shellQuote(effectiveContainerId)}` +
           ` -- sh -c '${innerEscaped}'`
@@ -261,7 +249,6 @@ export async function applyBashIntercept(
     const overridePath = join(projectRoot, ".pi", "devcontainer.override.json");
     return {
       command: (
-        displayComment +
         `devcontainer exec` +
         ` --workspace-folder ${shellQuote(hostWorkspace)}` +
         ` --override-config ${shellQuote(overridePath)}` +

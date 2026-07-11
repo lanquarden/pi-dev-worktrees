@@ -21,7 +21,6 @@ import { state, loadState, saveState } from "./session.js";
 import type { WorktreesState } from "./session.js";
 import { applyBashIntercept } from "./bash-intercept.js";
 import { detectRtkConflicts, probeContainerRtk } from "./rtk-compat.js";
-import type { BashRouting } from "./bash-intercept.js";
 import { registerDashboardUi, setDashboardProjectRoot, invalidateDashboardUi } from "./dashboard-ui.js";
 import {
   ensureWtpYml,
@@ -38,6 +37,8 @@ import {
 import type { WtpHook } from "./worktrees.js";
 import {
   loadPluginConfig,
+  areWorktreesEnabled,
+  isDevcontainerEnabled,
   resolveWorktreeRoot,
   resolvePostCreateHooks,
 } from "./config.js";
@@ -63,9 +64,22 @@ import {
   emitDevcontainerStopped,
   emitStateUpdate,
 } from "./dashboard-events.js";
+import {
+  bashDispatchByToolCall,
+  cleanupBashDispatch,
+  registerNativeBashRenderer,
+  resetBashRendererState,
+  setBashDispatch,
+} from "./bash-renderer.js";
+import type { BashDispatchMetadata, RtkExecution } from "./bash-renderer.js";
+import { excludeGeneratedArtifact } from "./generated-artifacts.js";
 
-// Module-level project root — resolved once in session_start
-let projectRoot = "";
+// Runtime roots are deliberately distinct.
+let sessionCwd = "";
+let gitRoot = "";
+let devcontainerRoot = "";
+let worktreesEnabled = true;
+let devcontainersEnabled = true;
 
 
 
@@ -73,9 +87,6 @@ let projectRoot = "";
 let resolvedWorktreeRoot: string = ".pi/worktrees";
 let resolvedPostCreateHooks: WtpHook[] = [];
 
-// Last bash routing decision — read by the tool_result hook to prefix output.
-// Reset to null before each tool_call so unrelated tool results don't inherit it.
-let lastBashRouting: BashRouting | null = null;
 
 // Keyed by toolCallId. Stores original LLM command (pre-RTK) captured in
 // tool_execution_start. Deleted after consuming in tool_call.
@@ -98,9 +109,10 @@ function isWtpAvailable(): boolean {
   }
 }
 
-function resolveProjectRoot(): string {
+function resolveGitRoot(cwd: string): string {
   try {
     return execSync("git rev-parse --show-toplevel", {
+      cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
@@ -109,12 +121,22 @@ function resolveProjectRoot(): string {
   }
 }
 
-function buildStatusString(s: WorktreesState): string {
-  const parts: string[] = ["pi-dev-worktrees"];
-  if (s.worktree) parts.push(`branch:${s.worktree.branch}`);
-  if (s.devcontainer?.enabled)
-    parts.push(s.devcontainer.starting ? "container:starting" : "container:on");
-  return parts.join(" | ");
+function buildStatusString(s: WorktreesState): string | undefined {
+  if (!s.devcontainer?.enabled) return undefined;
+  return s.devcontainer.starting ? "container:starting" : "container:on";
+}
+
+function refreshStatus(ctx: Pick<ExtensionContext, "ui" | "hasUI">): void {
+  if (ctx.hasUI === false) return;
+  ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+}
+
+function disabledWorktreeResult(): ActionResult {
+  return { ok: false, message: "Worktrees are externally managed; pi-dev-worktrees worktree actions are disabled by config." };
+}
+
+function disabledDevcontainerResult(): ActionResult {
+  return { ok: false, message: "Devcontainers are disabled by config." };
 }
 
 function enumerateWorktreeDirs(
@@ -154,94 +176,90 @@ interface ActionResult {
 }
 
 function worktreeStatus(): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!gitRoot) return { ok: false, message: "Not in a git repository" };
   if (state.worktree)
     return { ok: true, message: `Worktree active: ${state.worktree.path} (branch: ${state.worktree.branch})` };
   return { ok: true, message: "No worktree active — commands run in project root" };
 }
 
 function worktreeOff(pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!gitRoot) return { ok: false, message: "Not in a git repository" };
   state.worktree = undefined;
   saveState(pi, state);
-  emitWorkspaceOff(pi, projectRoot);
+  emitWorkspaceOff(pi, gitRoot);
   emitStateUpdate(pi, state);
   return { ok: true, message: "Worktree mode off — commands run in project root" };
 }
 
 function worktreeSet(branch: string, pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!gitRoot) return { ok: false, message: "Not in a git repository" };
   if (!isWtpAvailable()) return { ok: false, message: "wtp not found. Install wtp to use worktree features." };
 
   // Guard: prevent from being run inside a worktree
   try {
-    const wtList = execSync("git worktree list --porcelain", { cwd: projectRoot, encoding: "utf8" });
+    const wtList = execSync("git worktree list --porcelain", { cwd: gitRoot, encoding: "utf8" });
     const mainWorktree = wtList.split("\n").find(l => l.startsWith("worktree "))?.replace("worktree ", "").trim();
-    if (mainWorktree && projectRoot !== mainWorktree)
+    if (mainWorktree && gitRoot !== mainWorktree)
       return { ok: false, message: "Run from the main worktree, not from a worktree" };
   } catch { /* ignore */ }
 
   try {
-    ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
+    ensureWtpYml(gitRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
   } catch (err) {
     return { ok: false, message: `Failed to write .wtp.yml: ${String(err)}` };
   }
 
-  const resolvedRoot = resolve(projectRoot, resolvedWorktreeRoot);
+  const resolvedRoot = resolve(gitRoot, resolvedWorktreeRoot);
   const existingPath = join(resolvedRoot, branch);
   const isNew = !existsSync(existingPath);
 
   let worktreePath: string;
   let hookOutput = "";
   try {
-    const result = createOrTargetWorktree(branch, projectRoot, resolvedWorktreeRoot);
+    const result = createOrTargetWorktree(branch, gitRoot, resolvedWorktreeRoot);
     worktreePath = result.path;
     hookOutput = result.hookOutput;
   } catch (err) {
     return { ok: false, message: `Failed to create worktree: ${String(err)}` };
   }
 
-  const relPath = relative(projectRoot, worktreePath);
+  const relPath = relative(gitRoot, worktreePath);
   state.worktree = { branch, path: worktreePath };
   saveState(pi, state);
 
-  if (isNew) emitWorkspaceCreated(pi, branch, worktreePath, projectRoot);
-  else emitWorkspaceSwitched(pi, branch, worktreePath, projectRoot);
+  if (isNew) emitWorkspaceCreated(pi, branch, worktreePath, gitRoot);
+  else emitWorkspaceSwitched(pi, branch, worktreePath, gitRoot);
   emitStateUpdate(pi, state);
 
   return { ok: true, message: `Worktree active: ${relPath}/ — bash runs there`, hookOutput };
 }
 
-/** Mark the devcontainer as ready: update state, persist, emit events, notify, and probe for RTK. */
+/** Mark the devcontainer as ready and refresh all feedback. */
 function transitionContainerToReady(
   pi: ExtensionAPI,
-  ctx: { ui: ExtensionContext["ui"] },
+  ctx: Pick<ExtensionContext, "ui" | "hasUI">,
 ): void {
+  if (!state.devcontainer) return;
   state.devcontainer.starting = false;
-  const outcome = readStartupOutcome(projectRoot);
-  if (outcome.remoteWorkspaceFolder) {
-    state.devcontainer.remoteWorkspaceFolder = outcome.remoteWorkspaceFolder;
-  }
-  if (outcome.containerId) {
-    state.devcontainer.containerId = outcome.containerId;
-  }
+  const outcome = readStartupOutcome(devcontainerRoot);
+  if (outcome.remoteWorkspaceFolder) state.devcontainer.remoteWorkspaceFolder = outcome.remoteWorkspaceFolder;
+  if (outcome.containerId) state.devcontainer.containerId = outcome.containerId;
   saveState(pi, state);
-  emitDevcontainerReady(pi, state.devcontainer.workspace, projectRoot);
+  emitDevcontainerReady(pi, state.devcontainer.workspace, sessionCwd);
   emitStateUpdate(pi, state);
-  ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-  const idNote = state.devcontainer.containerId
-    ? ` — ${state.devcontainer.containerId.slice(0, 12)}`
-    : "";
-  ctx.ui.notify(`Devcontainer ready${idNote}`, "info");
+  refreshStatus(ctx);
+  const idNote = state.devcontainer.containerId ? ` — ${state.devcontainer.containerId.slice(0, 12)}` : "";
+  if (ctx.hasUI !== false) ctx.ui.notify(`Devcontainer ready${idNote}`, "info");
   if (pi.getCommands().some((c) => c.name === "rtk")) {
-    probeContainerRtk(projectRoot, outcome.containerId).then((available) => {
+    probeContainerRtk(devcontainerRoot, outcome.containerId).then((available) => {
       containerRtkAvailable = available;
     });
   }
 }
 
 function devcontainerStatus(): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!devcontainersEnabled) return disabledDevcontainerResult();
+  if (!devcontainerRoot) return { ok: false, message: "No devcontainer workspace is available" };
   if (state.devcontainer?.enabled) {
     const status = state.devcontainer.starting ? "starting…" : "running";
     const id = state.devcontainer.containerId ? ` (id: ${state.devcontainer.containerId.slice(0, 12)})` : "";
@@ -251,153 +269,197 @@ function devcontainerStatus(): ActionResult {
 }
 
 function devcontainerOff(pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
-  const workspace = state.devcontainer?.workspace ?? projectRoot;
-
-  // Do NOT stop the container on 'off' — other sessions may be using it.
-  // Simply disable targeting in this session.
+  if (!devcontainersEnabled) return disabledDevcontainerResult();
+  if (!devcontainerRoot) return { ok: false, message: "No devcontainer workspace is available" };
+  const workspace = state.devcontainer?.workspace ?? devcontainerRoot;
   if (state.devcontainer) {
     state.devcontainer.enabled = false;
     state.devcontainer.starting = false;
   }
   saveState(pi, state);
-  emitDevcontainerStopped(pi, workspace, projectRoot);
+  emitDevcontainerStopped(pi, workspace, sessionCwd);
   emitStateUpdate(pi, state);
-
   const idNote = state.devcontainer?.containerId
     ? ` Container ${state.devcontainer.containerId.slice(0, 12)} remains running.`
     : " Container remains running.";
   return { ok: true, message: `Devcontainer targeting off.${idNote} Use /devcontainer stop to stop it.` };
 }
 
-function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
-
+function ensureDevcontainerCli(): ActionResult | null {
   try {
     execSync("devcontainer --version", { stdio: "ignore", timeout: 5000 });
+    return null;
   } catch {
     return { ok: false, message: "devcontainer CLI not found. Install it to use container features." };
   }
+}
 
-  const configPath = findDevcontainerConfig(projectRoot);
-  if (!configPath)
-    return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
-
+function devcontainerRebuild(pi: ExtensionAPI): ActionResult {
+  if (!devcontainersEnabled) return disabledDevcontainerResult();
+  if (!devcontainerRoot) return { ok: false, message: "No devcontainer workspace is available" };
+  const cliError = ensureDevcontainerCli();
+  if (cliError) return cliError;
+  const configPath = findDevcontainerConfig(devcontainerRoot);
+  if (!configPath) return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at the devcontainer workspace root." };
   try {
-    generateOverrideJson(projectRoot, configPath, /* force */ true);
-  } catch (err) {
-    return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
-  }
-
-  // Force rebuild: stop any running container and clear the log before starting with --no-cache
-  stopContainer(projectRoot);
-  clearStartupLog(projectRoot);
-
-  try {
-    startContainer(projectRoot, /* removeExisting */ true, /* noCache */ true);
+    generateOverrideJson(devcontainerRoot, configPath, true, gitRoot || undefined);
+    stopContainer(devcontainerRoot);
+    clearStartupLog(devcontainerRoot);
+    startContainer(devcontainerRoot, true, true, gitRoot || undefined);
   } catch (err) {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
   }
-
-  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now(), containerId: undefined };
+  state.devcontainer = { enabled: true, workspace: devcontainerRoot, starting: true, startedAt: Date.now() };
   saveState(pi, state);
-  emitDevcontainerStarting(pi, projectRoot, projectRoot);
+  emitDevcontainerStarting(pi, devcontainerRoot, sessionCwd);
   emitStateUpdate(pi, state);
   return { ok: true, message: "Devcontainer rebuild started — full image rebuild in progress (this takes longer than a normal start)" };
 }
 
 function devcontainerOn(pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
-
+  if (!devcontainersEnabled) return disabledDevcontainerResult();
+  if (!devcontainerRoot) return { ok: false, message: "No devcontainer workspace is available" };
+  const cliError = ensureDevcontainerCli();
+  if (cliError) return cliError;
+  const configPath = findDevcontainerConfig(devcontainerRoot);
+  if (!configPath) return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at the devcontainer workspace root." };
   try {
-    execSync("devcontainer --version", { stdio: "ignore", timeout: 5000 });
-  } catch {
-    return { ok: false, message: "devcontainer CLI not found. Install it to use container features." };
-  }
-
-  const configPath = findDevcontainerConfig(projectRoot);
-  if (!configPath)
-    return { ok: false, message: "No .devcontainer/devcontainer.json or .devcontainer.json found at project root." };
-
-  try {
-    // Regenerate the override so it stays in sync with the current devcontainer.json.
-    generateOverrideJson(projectRoot, configPath, /* force */ true);
+    generateOverrideJson(devcontainerRoot, configPath, true, gitRoot || undefined);
   } catch (err) {
     return { ok: false, message: `Failed to generate devcontainer override: ${String(err)}` };
   }
-
-  // If a container is already responding for this project, reuse it instead of restarting.
-  if (probeContainer(projectRoot)) {
-    const { containerId: logId, remoteWorkspaceFolder } = readStartupOutcome(projectRoot);
-    const labelId = findContainerIdByLabel(projectRoot);
-    const resolvedId = logId ?? labelId ?? state.devcontainer?.containerId;
+  if (probeContainer(devcontainerRoot)) {
+    const { containerId: logId, remoteWorkspaceFolder } = readStartupOutcome(devcontainerRoot);
+    const resolvedId = logId ?? findContainerIdByLabel(devcontainerRoot) ?? state.devcontainer?.containerId;
     state.devcontainer = {
       enabled: true,
-      workspace: projectRoot,
+      workspace: devcontainerRoot,
       starting: false,
       remoteWorkspaceFolder: remoteWorkspaceFolder ?? state.devcontainer?.remoteWorkspaceFolder,
       containerId: resolvedId,
     };
     saveState(pi, state);
-    emitDevcontainerReady(pi, projectRoot, projectRoot);
+    emitDevcontainerReady(pi, devcontainerRoot, sessionCwd);
     emitStateUpdate(pi, state);
-    const idMsg = state.devcontainer.containerId ? ` (container ${state.devcontainer.containerId.slice(0, 12)})` : " (id unknown)";
+    const idMsg = resolvedId ? ` (container ${resolvedId.slice(0, 12)})` : " (id unknown)";
     return { ok: true, message: `Devcontainer targeting on — reusing running container${idMsg}` };
   }
-
-  // Otherwise, clean up any stale container and start fresh.
-  stopContainer(projectRoot);
-  clearStartupLog(projectRoot);
-
+  stopContainer(devcontainerRoot);
+  clearStartupLog(devcontainerRoot);
   try {
-    startContainer(projectRoot, /* removeExisting */ true);
+    startContainer(devcontainerRoot, true, false, gitRoot || undefined);
   } catch (err) {
     return { ok: false, message: `Failed to start container: ${String(err)}` };
   }
-
-  state.devcontainer = { enabled: true, workspace: projectRoot, starting: true, startedAt: Date.now() };
+  state.devcontainer = { enabled: true, workspace: devcontainerRoot, starting: true, startedAt: Date.now() };
   saveState(pi, state);
-  emitDevcontainerStarting(pi, projectRoot, projectRoot);
+  emitDevcontainerStarting(pi, devcontainerRoot, sessionCwd);
   emitStateUpdate(pi, state);
   return { ok: true, message: "Container starting… bash commands will queue until it's ready" };
 }
 
-/**
- * Stop the devcontainer and clean up all associated state.
- * Returns the status message — callers handle their own output (tool result vs. notification).
- */
 function doDevcontainerStop(pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
-  const { stopped, containerId, stoppedAllByLabel } = stopContainer(projectRoot);
-  if (stopped) {
-    clearStartupLog(projectRoot);
-    const workspace = state.devcontainer?.workspace ?? projectRoot;
-    if (state.devcontainer) {
-      state.devcontainer.enabled = false;
-      state.devcontainer.starting = false;
-      state.devcontainer.containerId = undefined;
-    }
-    saveState(pi, state);
-    emitDevcontainerStopped(pi, workspace, projectRoot);
-    emitStateUpdate(pi, state);
-    const note = stoppedAllByLabel
-      ? "Devcontainer(s) stopped by label"
-      : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
-    return { ok: true, message: note };
+  if (!devcontainersEnabled) return disabledDevcontainerResult();
+  if (!devcontainerRoot) return { ok: false, message: "No devcontainer workspace is available" };
+  const { stopped, containerId, stoppedAllByLabel } = stopContainer(devcontainerRoot);
+  if (!stopped) return { ok: false, message: `Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}` };
+  clearStartupLog(devcontainerRoot);
+  const workspace = state.devcontainer?.workspace ?? devcontainerRoot;
+  if (state.devcontainer) {
+    state.devcontainer.enabled = false;
+    state.devcontainer.starting = false;
+    state.devcontainer.containerId = undefined;
   }
-  return { ok: false, message: `Failed to stop devcontainer${containerId ? `: ${containerId.slice(0, 12)}` : ""}` };
+  saveState(pi, state);
+  emitDevcontainerStopped(pi, workspace, sessionCwd);
+  emitStateUpdate(pi, state);
+  const note = stoppedAllByLabel
+    ? "Devcontainer(s) stopped by label"
+    : `Devcontainer stopped${containerId ? `: ${containerId.slice(0, 12)}` : ""}`;
+  return { ok: true, message: note };
+}
+
+function reconcileRestoredDevcontainer(
+  pi: ExtensionAPI,
+  ctx: Pick<ExtensionContext, "ui" | "hasUI">,
+): void {
+  const restored = state.devcontainer;
+  if (!restored?.enabled || !devcontainerRoot) return;
+
+  const outcome = readStartupOutcome(devcontainerRoot);
+  const remoteWorkspace = restored.workspace === devcontainerRoot
+    ? restored.remoteWorkspaceFolder ?? outcome.remoteWorkspaceFolder
+    : outcome.remoteWorkspaceFolder;
+  const differentWorkspace = restored.workspace !== devcontainerRoot;
+  const mismatchedMount = Boolean(remoteWorkspace && remoteWorkspace !== devcontainerRoot);
+
+  if (!differentWorkspace && !mismatchedMount) {
+    if (restored.starting) return;
+    if (probeContainer(devcontainerRoot)) {
+      transitionContainerToReady(pi, ctx);
+      return;
+    }
+    // Restored targeting claims readiness but the current-root container is gone.
+    // Re-enter the normal reconciliation path and recreate only this root.
+  }
+
+  const replaceCurrentRoot = mismatchedMount || !differentWorkspace;
+  state.devcontainer = {
+    enabled: true,
+    workspace: devcontainerRoot,
+    starting: true,
+    startedAt: Date.now(),
+  };
+  saveState(pi, state);
+  refreshStatus(ctx);
+  if (ctx.hasUI !== false) {
+    ctx.ui.notify("Restarting devcontainer targeting for the current session cwd.", "info");
+  }
+
+  const cliError = ensureDevcontainerCli();
+  const configPath = findDevcontainerConfig(devcontainerRoot);
+  if (cliError || !configPath) {
+    state.devcontainer = undefined;
+    saveState(pi, state);
+    refreshStatus(ctx);
+    if (ctx.hasUI !== false) {
+      ctx.ui.notify(
+        cliError?.message ?? "No .devcontainer/devcontainer.json or .devcontainer.json found at the devcontainer workspace root.",
+        "warning",
+      );
+    }
+    return;
+  }
+
+  try {
+    generateOverrideJson(devcontainerRoot, configPath, true, gitRoot || undefined);
+    if (differentWorkspace && !mismatchedMount && probeContainer(devcontainerRoot)) {
+      transitionContainerToReady(pi, ctx);
+      return;
+    }
+    if (replaceCurrentRoot) stopContainer(devcontainerRoot);
+    clearStartupLog(devcontainerRoot);
+    startContainer(devcontainerRoot, replaceCurrentRoot, false, gitRoot || undefined);
+    emitDevcontainerStarting(pi, devcontainerRoot, sessionCwd);
+    emitStateUpdate(pi, state);
+  } catch (err) {
+    state.devcontainer = undefined;
+    saveState(pi, state);
+    refreshStatus(ctx);
+    if (ctx.hasUI !== false) ctx.ui.notify(`Failed to start container: ${String(err)}`, "warning");
+  }
 }
 
 function workspacesSnapshot(): string {
-  if (!projectRoot) return "Not in a git repository";
+  if (!gitRoot) return "Not in a git repository";
 
   const lines: string[] = [`Worktrees (${resolvedWorktreeRoot}/):`,];
-  const worktreesRoot = resolve(projectRoot, resolvedWorktreeRoot);
+  const worktreesRoot = resolve(gitRoot, resolvedWorktreeRoot);
   let worktreeEntries: Array<{ branch: string; path: string }> = [];
 
   if (existsSync(worktreesRoot)) {
     try {
-      worktreeEntries = listWtpWorktrees(projectRoot, worktreesRoot);
+      worktreeEntries = listWtpWorktrees(gitRoot, worktreesRoot);
     } catch {
       worktreeEntries = enumerateWorktreeDirs(worktreesRoot, worktreesRoot);
     }
@@ -410,7 +472,7 @@ function workspacesSnapshot(): string {
       const isCurrent = state.worktree?.path === entry.path;
       const marker = isCurrent ? "●" : "○";
       const suffix = isCurrent ? "  [this session]" : "";
-      const relPath = relative(projectRoot, entry.path);
+      const relPath = relative(gitRoot, entry.path);
       let head = "";
       try {
         head = execSync("git rev-parse --abbrev-ref HEAD", { cwd: entry.path, encoding: "utf8", timeout: 3000 }).trim();
@@ -423,7 +485,7 @@ function workspacesSnapshot(): string {
   lines.push("");
   lines.push("Devcontainer:");
   if (state.devcontainer?.enabled) {
-    const alive = probeContainer(projectRoot);
+    const alive = probeContainer(gitRoot);
     if (alive) {
       lines.push("  ● Running at project root");
       lines.push("  Use HOST: prefix to bypass container");
@@ -444,10 +506,10 @@ function workspacesSnapshot(): string {
 // ──────────────────────────────────────────────
 
 function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
-  if (!projectRoot) return { ok: false, message: "Not in a git repository" };
+  if (!gitRoot) return { ok: false, message: "Not in a git repository" };
   if (!isWtpAvailable()) return { ok: false, message: "wtp not found. Install wtp to use worktree features." };
 
-  const resolvedRoot = resolve(projectRoot, resolvedWorktreeRoot);
+  const resolvedRoot = resolve(gitRoot, resolvedWorktreeRoot);
   const worktreePath = join(resolvedRoot, branch);
 
   let dirty = false;
@@ -457,13 +519,13 @@ function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
 
   try {
     execSync(`wtp remove ${dirty ? "--force " : ""}${shellEscapeArg(branch)}`, {
-      cwd: projectRoot, encoding: "utf8",
+      cwd: gitRoot, encoding: "utf8",
     });
   } catch (err) {
     return { ok: false, message: `Failed to remove worktree '${branch}': ${String(err)}` };
   }
 
-  emitWorkspaceRemoved(pi, branch, worktreePath, projectRoot);
+  emitWorkspaceRemoved(pi, branch, worktreePath, gitRoot);
 
   if (state.worktree?.branch === branch) {
     state.worktree = undefined;
@@ -472,7 +534,7 @@ function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
   }
 
   try {
-    execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" });
+    execSync("git worktree prune", { cwd: gitRoot, encoding: "utf8" });
   } catch { /* best-effort */ }
 
   return { ok: true, message: `Removed worktree '${branch}'` };
@@ -482,8 +544,8 @@ function doWorktreeRemove(branch: string, pi: ExtensionAPI): ActionResult {
 // Hook management helpers
 // ──────────────────────────────────────────────
 
-function worktreeHooksShow(projectRoot: string): ActionResult {
-  const config = readWtpYml(projectRoot);
+function worktreeHooksShow(gitRoot: string): ActionResult {
+  const config = readWtpYml(gitRoot);
   if (!config) {
     return { ok: true, message: "No .wtp.yml found. Run /worktree init or /worktree hooks add <cmd> to create one." };
   }
@@ -501,11 +563,11 @@ function worktreeHooksShow(projectRoot: string): ActionResult {
   return { ok: true, message: lines.join("\n") };
 }
 
-function worktreeHooksAdd(command: string, projectRoot: string): ActionResult {
+function worktreeHooksAdd(command: string, gitRoot: string): ActionResult {
   if (!command.trim()) {
     return { ok: true, message: "Usage: /worktree hooks add <command>" };
   }
-  let config = readWtpYml(projectRoot);
+  let config = readWtpYml(gitRoot);
   if (!config) {
     // Create default config structure
     config = {
@@ -515,17 +577,17 @@ function worktreeHooksAdd(command: string, projectRoot: string): ActionResult {
     };
   }
   const updatedConfig = addCommandHook(config, command.trim());
-  writeWtpYml(projectRoot, updatedConfig);
+  writeWtpYml(gitRoot, updatedConfig);
   const n = listHooks(updatedConfig).length;
   return { ok: true, message: `Added hook [${n}]: ${command.trim()}` };
 }
 
 async function worktreeHooksRemove(
   indexStr: string,
-  projectRoot: string,
+  gitRoot: string,
   ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
 ): Promise<void> {
-  const config = readWtpYml(projectRoot);
+  const config = readWtpYml(gitRoot);
   if (!config) {
     ctx.ui.notify("No hooks to remove.", "info");
     return;
@@ -550,15 +612,15 @@ async function worktreeHooksRemove(
     return;
   }
   const updatedConfig = removeHook(config, index);
-  writeWtpYml(projectRoot, updatedConfig);
+  writeWtpYml(gitRoot, updatedConfig);
   ctx.ui.notify(`Removed hook [${index}]: ${hookDesc}`, "info");
 }
 
 async function worktreeHooksClear(
-  projectRoot: string,
+  gitRoot: string,
   ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
 ): Promise<void> {
-  const config = readWtpYml(projectRoot);
+  const config = readWtpYml(gitRoot);
   if (!config) {
     ctx.ui.notify("No post_create hooks to clear.", "info");
     return;
@@ -577,15 +639,15 @@ async function worktreeHooksClear(
     return;
   }
   const updatedConfig = { ...config, hooks: { ...config.hooks, post_create: [] } };
-  writeWtpYml(projectRoot, updatedConfig);
+  writeWtpYml(gitRoot, updatedConfig);
   ctx.ui.notify("Cleared all post_create hooks.", "info");
 }
 
 async function worktreeInit(
-  projectRoot: string,
+  gitRoot: string,
   ctx: Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["handler"]>[1],
 ): Promise<void> {
-  const existingConfig = readWtpYml(projectRoot);
+  const existingConfig = readWtpYml(gitRoot);
   if (existingConfig) {
     const confirmed = await ctx.ui.confirm(
       "Regenerate .wtp.yml?",
@@ -642,7 +704,9 @@ hooks:
     - type: command
       command: "[ -f .envrc ] && direnv allow || true"
 `;
-    writeFileSync(pathJoin(projectRoot, ".wtp.yml"), WTP_DEFAULT, "utf8");
+    const generatedPath = pathJoin(gitRoot, ".wtp.yml");
+    writeFileSync(generatedPath, WTP_DEFAULT, "utf8");
+    excludeGeneratedArtifact(gitRoot, generatedPath);
     ctx.ui.notify("Written .wtp.yml with default hooks.", "info");
     return;
   }
@@ -652,7 +716,7 @@ hooks:
     defaults: { base_dir: resolvedWorktreeRoot },
     hooks: { post_create: allHooks as import("./worktrees.js").WtpHook[] },
   };
-  writeWtpYml(projectRoot, config);
+  writeWtpYml(gitRoot, config);
   ctx.ui.notify(`Written .wtp.yml with ${allHooks.length} post_create hook(s).`, "info");
 }
 
@@ -666,63 +730,82 @@ export default function (pi: ExtensionAPI) {
   // The bridge's session_start handler calls refreshUiModules (which emits
   // ui:list-modules) BEFORE pi-dev-worktrees' session_start runs. Registering
   // here ensures the ui:list-modules listener is in place before the bridge
-  // fires it. projectRoot is set separately via setDashboardProjectRoot().
-  registerDashboardUi(pi);
+  // fires it. gitRoot is set separately via setDashboardProjectRoot().
+  registerDashboardUi(pi, areWorktreesEnabled(loadPluginConfig()));
 
   // ── session_start ──────────────────────────
   pi.on("session_start", async (_event, ctx) => {
-    projectRoot = resolveProjectRoot();
+    sessionCwd = ctx.cwd;
+    const pluginConfig = loadPluginConfig();
+    worktreesEnabled = areWorktreesEnabled(pluginConfig);
+    devcontainersEnabled = isDevcontainerEnabled(pluginConfig);
+    gitRoot = resolveGitRoot(sessionCwd);
+    devcontainerRoot = worktreesEnabled ? gitRoot : sessionCwd;
+    containerRtkAvailable = false;
+    pendingLlmCommands.clear();
+    resetBashRendererState();
 
     const restored = loadState(ctx);
-    Object.assign(state, restored);
+    state.worktree = restored.worktree;
+    state.devcontainer = restored.devcontainer;
+    let sanitized = false;
+    if (!worktreesEnabled && state.worktree) {
+      state.worktree = undefined;
+      sanitized = true;
+    }
+    if (!devcontainersEnabled && state.devcontainer) {
+      state.devcontainer = undefined;
+      sanitized = true;
+    }
+    if (sanitized) saveState(pi, state);
 
-    if (!projectRoot) return;
+    const activeTools = (pi as any).getActiveTools?.() as string[] | undefined;
+    if (activeTools && (pi as any).setActiveTools) {
+      (pi as any).setActiveTools(activeTools.filter((name) =>
+        (worktreesEnabled || name !== "worktree") &&
+        (devcontainersEnabled || name !== "devcontainer")
+      ));
+    }
 
-    // Resolve per-repo config once at session start
-    let remoteUrl = "";
-    try {
-      remoteUrl = execSync("git remote get-url origin", { cwd: projectRoot, encoding: "utf8" }).trim();
-    } catch { /* no origin remote — treat as empty */ }
-    const pluginConfig = loadPluginConfig();
-    resolvedWorktreeRoot = resolveWorktreeRoot(remoteUrl, pluginConfig);
-    resolvedPostCreateHooks = resolvePostCreateHooks(remoteUrl, pluginConfig);
+    setDashboardProjectRoot(gitRoot, worktreesEnabled);
 
-    try {
-      const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
-      if (generated) {
-        ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
-      } else {
-        // .wtp.yml already exists — read its base_dir as the authoritative
-        // worktree root. This takes precedence over plugin config defaults
-        // since the user (or wtp setup) explicitly configured it.
-        const existingConfig = readWtpYml(projectRoot);
-        if (existingConfig?.defaults?.base_dir) {
-          resolvedWorktreeRoot = existingConfig.defaults.base_dir;
+    if (worktreesEnabled && gitRoot) {
+      let remoteUrl = "";
+      try {
+        remoteUrl = execSync("git remote get-url origin", { cwd: gitRoot, encoding: "utf8" }).trim();
+      } catch { /* no origin remote */ }
+      resolvedWorktreeRoot = resolveWorktreeRoot(remoteUrl, pluginConfig);
+      resolvedPostCreateHooks = resolvePostCreateHooks(remoteUrl, pluginConfig);
+      try {
+        const generated = ensureWtpYml(gitRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
+        if (generated && ctx.hasUI !== false) {
+          ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
+        } else if (!generated) {
+          const existingConfig = readWtpYml(gitRoot);
+          if (existingConfig?.defaults?.base_dir) resolvedWorktreeRoot = existingConfig.defaults.base_dir;
         }
-      }
-    } catch { /* non-fatal */ }
+      } catch { /* non-fatal */ }
+    }
 
-    ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
-    detectRtkConflicts(pi, ctx);
-    setDashboardProjectRoot(projectRoot);
-    // Trigger a fresh probe now that projectRoot is known and state is
-    // restored. This ensures the footer-segment and modal reflect the
-    // correct initial state (e.g. a restored worktree/devcontainer).
+    refreshStatus(ctx);
+    const rendererInstalled = registerNativeBashRenderer(pi, sessionCwd, ctx);
+    if (ctx.mode !== "tui" || rendererInstalled) detectRtkConflicts(pi, ctx);
+    if (devcontainersEnabled) reconcileRestoredDevcontainer(pi, ctx);
     invalidateDashboardUi(pi);
   });
 
   // ── before_agent_start ─────────────────────
   pi.on("before_agent_start", async () => {
-    if (!state.worktree && !state.devcontainer?.enabled) return;
+    if ((!worktreesEnabled || !state.worktree) && (!devcontainersEnabled || !state.devcontainer?.enabled)) return;
 
     const lines = ["## Active Workspace (pi-dev-worktrees)"];
-    if (state.worktree) {
+    if (worktreesEnabled && state.worktree) {
       lines.push(`- Branch: \`${state.worktree.branch}\``);
       lines.push(`- Worktree path: \`${state.worktree.path}\``);
       lines.push("- Bash commands are run inside this worktree directory on the host");
       lines.push("- File tools (read/write/edit) with relative paths are also routed to the worktree — use absolute paths to target the original project root");
     }
-    if (state.devcontainer?.enabled) {
+    if (devcontainersEnabled && state.devcontainer?.enabled) {
       const status = state.devcontainer.starting ? "starting…" : "running";
       lines.push(`- Devcontainer: ${status}`);
       if (state.devcontainer.starting) {
@@ -751,7 +834,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── tool_call: route file tools (read/write/edit) to worktree for relative paths ────────────
   pi.on("tool_call", async (event, _ctx) => {
-    if (!projectRoot) return;
+    if (!worktreesEnabled || !gitRoot) return;
     // Only adjust when a worktree is active
     const base = state.worktree?.path;
     if (!base) return;
@@ -769,18 +852,18 @@ export default function (pi: ExtensionAPI) {
 
   // ── tool_call bash interception ────────────
   pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName !== "bash" || !projectRoot) return;
+    if (event.toolName !== "bash" || (!gitRoot && !devcontainerRoot)) return;
 
     if (state.devcontainer?.enabled && state.devcontainer.starting) {
       // Fast-path: check if the startup log already says success or error
       // before doing the slower exec probe.
-      const { outcome, message: outcomeMsg } = readStartupOutcome(projectRoot);
+      const { outcome, message: outcomeMsg } = readStartupOutcome(devcontainerRoot);
       if (outcome === "error") {
         state.devcontainer.starting = false;
         state.devcontainer.enabled = false;
         saveState(pi, state);
         emitStateUpdate(pi, state);
-        ctx.ui.setStatus("pi-dev-worktrees", buildStatusString(state));
+        refreshStatus(ctx);
         const reason = outcomeMsg ? `\n${outcomeMsg}` : "";
         ctx.ui.notify(
           `Devcontainer startup failed — targeting disabled. Run /devcontainer logs for details.${reason}`,
@@ -788,7 +871,7 @@ export default function (pi: ExtensionAPI) {
         );
       } else if (outcome === "success") {
         transitionContainerToReady(pi, ctx);
-      } else if (probeContainer(projectRoot)) {
+      } else if (probeContainer(devcontainerRoot)) {
         transitionContainerToReady(pi, ctx);
       }
     }
@@ -812,25 +895,26 @@ export default function (pi: ExtensionAPI) {
         ? llmCommand
         : rtkCommand;
 
-    lastBashRouting = null; // reset before each call
-    const result = await applyBashIntercept(commandToIntercept, state, projectRoot);
-    lastBashRouting = result.routing;
+    const result = await applyBashIntercept(commandToIntercept, state, devcontainerRoot || gitRoot);
     (event.input as { command: string }).command = result.command;
 
-    // Emit dispatch metadata via pi event bus. The dashboard bridge forwards
-    // all pi.events.emit calls as event_forward messages automatically.
-    // The client event reducer catches "pi-dev-worktrees:bash-dispatch" and
-    // patches the matching tool row with the dispatch data.
-    const dispatchPayload = {
+    const rtk: RtkExecution = !rtkRewritten
+      ? "none"
+      : commandToIntercept === llmCommand ? "fallback" : "applied";
+    const dispatchPayload: BashDispatchMetadata & { toolCallId?: string } = {
       toolCallId: event.toolCallId,
       llmCommand,
       rtkRewritten,
       rtkCommand: rtkRewritten ? rtkCommand : undefined,
+      rtk,
       routing: result.routing,
       containerId: result.containerId,
-      cwd: result.cwd,
+      cwd: worktreesEnabled ? result.cwd : undefined,
       hasDevcontainer: state.devcontainer !== undefined,
+      containerTargetingActive: Boolean(state.devcontainer?.enabled),
+      managedWorktree: worktreesEnabled && Boolean(state.worktree),
     };
+    setBashDispatch(event.toolCallId, dispatchPayload);
     (pi as any).events?.emit("pi-dev-worktrees:bash-dispatch", dispatchPayload);
   });
 
@@ -840,20 +924,27 @@ export default function (pi: ExtensionAPI) {
   // so the prefix in the result is the main grounding signal for both TUI
   // and dashboard sessions.
   pi.on("tool_result", async (event) => {
-    if (event.toolName !== "bash" || lastBashRouting === null) return;
-    const routing = lastBashRouting;
-    lastBashRouting = null; // consume
+    if (event.toolName !== "bash") return;
+    const metadata = bashDispatchByToolCall.get(event.toolCallId ?? "");
+    if (!metadata) return;
+    const { routing, hasDevcontainer } = metadata;
+    cleanupBashDispatch(event.toolCallId);
     if (routing === "error") return; // error text is self-explanatory
 
     const prefix = routing === "container" ? "[container]\n" : "[host]\n";
-    // Only prefix [host] when a devcontainer is configured — without one,
-    // everything runs on host and the prefix is just noise.
-    if (routing === "host" && !state.devcontainer) return;
+    // Only prefix [host] when a devcontainer was configured for this call.
+    if (routing === "host" && !hasDevcontainer) return;
     const updated = event.content.map((block) => {
       if (block.type !== "text") return block;
       return { ...block, text: prefix + block.text };
     });
     return { content: updated };
+  });
+
+  pi.on("tool_execution_end", (event) => {
+    if (event.toolName !== "bash") return;
+    pendingLlmCommands.delete(event.toolCallId ?? "");
+    cleanupBashDispatch(event.toolCallId);
   });
 
   // ── user_bash: apply worktree / container routing to ! commands ─────────
@@ -862,9 +953,9 @@ export default function (pi: ExtensionAPI) {
     // same policy as pi-rtk-optimizer. User opted out of context inclusion;
     // routing would be surprising.
     if (event.excludeFromContext) return undefined;
-    if (!projectRoot) return undefined;
+    if (!gitRoot && !devcontainerRoot) return undefined;
 
-    const result = await applyBashIntercept(event.command, state, projectRoot);
+    const result = await applyBashIntercept(event.command, state, devcontainerRoot || gitRoot);
     // If routing is "error" the command is already replaced with an error
     // message command by applyBashIntercept; run it as-is on the host.
     const localOps = createLocalBashOperations();
@@ -891,6 +982,10 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { action, branch } = params;
+      if (!worktreesEnabled) {
+        const result = disabledWorktreeResult();
+        return { content: [{ type: "text", text: result.message }], details: { ok: false } };
+      }
 
       // Runtime enforcement: branch required for set/remove
       if ((action === "set" || action === "remove") && !branch) {
@@ -913,11 +1008,11 @@ export default function (pi: ExtensionAPI) {
           break;
         }
         case "prune": {
-          if (!projectRoot) {
+          if (!gitRoot) {
             result = { ok: false, message: "Not in a git repository" };
           } else {
             try {
-              const output = execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" }).trim();
+              const output = execSync("git worktree prune", { cwd: gitRoot, encoding: "utf8" }).trim();
               result = { ok: true, message: output || "No stale worktree metadata found." };
             } catch (e) {
               result = { ok: false, message: "git worktree prune failed: " + (e instanceof Error ? e.message : String(e)) };
@@ -953,8 +1048,12 @@ export default function (pi: ExtensionAPI) {
         description: "Operation to perform on the devcontainer",
       }),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { action } = params;
+      if (!devcontainersEnabled) {
+        const result = disabledDevcontainerResult();
+        return { content: [{ type: "text", text: result.message }], details: { ok: false } };
+      }
       let result: ActionResult;
 
       switch (action) {
@@ -966,16 +1065,17 @@ export default function (pi: ExtensionAPI) {
         }
         case "rebuild": result = devcontainerRebuild(pi); break;
         case "logs": {
-          if (!projectRoot) {
-            result = { ok: false, message: "Not in a git repository" };
+          if (!devcontainerRoot) {
+            result = { ok: false, message: "No devcontainer workspace is available" };
           } else {
-            const logTail = tailContainerLog(projectRoot, 50);
-            result = { ok: true, message: logTail || `No startup log found. Expected at: ${containerLogPath(projectRoot)}` };
+            const logTail = tailContainerLog(devcontainerRoot, 50);
+            result = { ok: true, message: logTail || `No startup log found. Expected at: ${containerLogPath(devcontainerRoot)}` };
           }
           break;
         }
       }
 
+      refreshStatus(ctx);
       return {
         content: [{ type: "text", text: result!.message }],
         details: { ok: result!.ok },
@@ -988,6 +1088,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("worktree", {
     description: "Manage git worktrees. Usage: /worktree [set] <branch> | off | prune | status | remove <branch> | init | hooks ...",
     handler: async (args, ctx) => {
+      if (!worktreesEnabled) {
+        const r = disabledWorktreeResult();
+        ctx.ui.notify(r.message, "info");
+        return;
+      }
       const arg = args?.trim();
       if (!arg) {
         const r = worktreeStatus();
@@ -1001,20 +1106,20 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (arg === "init") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-        await worktreeInit(projectRoot, ctx);
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        await worktreeInit(gitRoot, ctx);
         return;
       }
       if (arg === "hooks" || arg === "hooks show") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-        const r = worktreeHooksShow(projectRoot);
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        const r = worktreeHooksShow(gitRoot);
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
       if (arg.startsWith("hooks add ")) {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
         const cmd = arg.slice("hooks add ".length).trim();
-        const r = worktreeHooksAdd(cmd, projectRoot);
+        const r = worktreeHooksAdd(cmd, gitRoot);
         ctx.ui.notify(r.message, r.ok ? "info" : "warning");
         return;
       }
@@ -1023,20 +1128,20 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (arg.startsWith("hooks remove ")) {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
         const idxStr = arg.slice("hooks remove ".length).trim();
-        await worktreeHooksRemove(idxStr, projectRoot, ctx);
+        await worktreeHooksRemove(idxStr, gitRoot, ctx);
         return;
       }
       if (arg === "hooks clear") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-        await worktreeHooksClear(projectRoot, ctx);
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        await worktreeHooksClear(gitRoot, ctx);
         return;
       }
       if (arg === "prune") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
         try {
-          const output = execSync("git worktree prune", { cwd: projectRoot, encoding: "utf8" }).trim();
+          const output = execSync("git worktree prune", { cwd: gitRoot, encoding: "utf8" }).trim();
           ctx.ui.notify(output || "No stale worktree metadata found.", "info");
         } catch (e) {
           ctx.ui.notify("git worktree prune failed: " + (e instanceof Error ? e.message : String(e)), "warning");
@@ -1054,7 +1159,7 @@ export default function (pi: ExtensionAPI) {
       if (arg.startsWith("remove ")) {
         const branch = arg.slice("remove ".length).trim();
         if (!branch) { ctx.ui.notify("Usage: /worktree remove <branch>", "info"); return; }
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
+        if (!gitRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
         if (!isWtpAvailable()) { ctx.ui.notify("wtp not found. Install wtp to use worktree features.", "warning"); return; }
         const confirmed = await ctx.ui.confirm(
           `Remove worktree '${branch}'?`,
@@ -1074,7 +1179,7 @@ export default function (pi: ExtensionAPI) {
       }
       // Ensure wtp.yml — surface notice here since tools silently skip it
       try {
-        const generated = ensureWtpYml(projectRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
+        const generated = ensureWtpYml(gitRoot, resolvedWorktreeRoot, resolvedPostCreateHooks);
         if (generated) ctx.ui.notify(`Generated .wtp.yml (base_dir: ${resolvedWorktreeRoot})`, "info");
       } catch (err) {
         ctx.ui.notify(`Failed to write .wtp.yml: ${String(err)}`, "warning");
@@ -1091,6 +1196,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("devcontainer", {
     description: "Manage devcontainer targeting. Usage: /devcontainer [on | off | stop | rebuild | logs]",
     handler: async (args, ctx) => {
+      if (!devcontainersEnabled) {
+        const r = disabledDevcontainerResult();
+        ctx.ui.notify(r.message, "info");
+        return;
+      }
       const arg = args?.trim();
       if (!arg) {
         const r = devcontainerStatus();
@@ -1122,10 +1232,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (arg === "logs") {
-        if (!projectRoot) { ctx.ui.notify("Not in a git repository", "warning"); return; }
-        const logTail = tailContainerLog(projectRoot, 50);
+        if (!devcontainerRoot) { ctx.ui.notify("No devcontainer workspace is available", "warning"); return; }
+        const logTail = tailContainerLog(devcontainerRoot, 50);
         if (!logTail) {
-          ctx.ui.notify(`No startup log found. Expected at: ${containerLogPath(projectRoot)}`, "info");
+          ctx.ui.notify(`No startup log found. Expected at: ${containerLogPath(devcontainerRoot)}`, "info");
         } else {
           ctx.ui.notify(logTail, "info");
         }

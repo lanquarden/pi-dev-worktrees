@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -188,27 +188,16 @@ describe("generateOverrideJson", () => {
     expect(JSON.parse(second).workspaceFolder).toBe("${localWorkspaceFolder}");
   });
 
-  it("adds pattern to .gitignore", () => {
+  it("does not create .gitignore in a non-Git workspace", () => {
     generateOverrideJson(dir);
-    const gitignore = readFileSync(join(dir, ".gitignore"), "utf8");
-    expect(gitignore).toContain(".pi/devcontainer.override.json");
+    expect(existsSync(join(dir, ".gitignore"))).toBe(false);
   });
 
-  it("does not duplicate pattern if already in .gitignore", () => {
-    writeFileSync(join(dir, ".gitignore"), ".pi/devcontainer.override.json\n");
+  it("preserves an existing .gitignore byte-for-byte", () => {
+    const original = "node_modules/\n# user policy\n.pi/devcontainer.override.json\n";
+    writeFileSync(join(dir, ".gitignore"), original);
     generateOverrideJson(dir);
-    const gitignore = readFileSync(join(dir, ".gitignore"), "utf8");
-    const count = (
-      gitignore.match(/\.pi\/devcontainer\.override\.json/g) ?? []
-    ).length;
-    expect(count).toBe(1);
-  });
-
-  it("appends correctly to non-empty .gitignore without extra blank line", () => {
-    writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-    generateOverrideJson(dir);
-    const gitignore = readFileSync(join(dir, ".gitignore"), "utf8");
-    expect(gitignore).toContain("node_modules/\n.pi/devcontainer.override.json\n");
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe(original);
   });
 });
 

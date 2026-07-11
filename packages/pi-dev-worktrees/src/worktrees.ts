@@ -3,9 +3,10 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, appendFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as yaml from "js-yaml";
+import { excludeGeneratedArtifact } from "./generated-artifacts.js";
 
 const DEFAULT_HOOKS_YAML = `    # Copy gitignored secrets from the main repo into the new worktree
     - type: command
@@ -61,6 +62,7 @@ export function readWtpYml(projectRoot: string): WtpConfig | null {
  */
 export function writeWtpYml(projectRoot: string, config: WtpConfig): void {
   const wtpYmlPath = join(projectRoot, ".wtp.yml");
+  excludeGeneratedArtifact(projectRoot, wtpYmlPath);
   const content = yaml.dump(config, { lineWidth: -1, noRefs: true });
   writeFileSync(wtpYmlPath, content, "utf8");
 }
@@ -165,6 +167,7 @@ hooks:
 ${DEFAULT_HOOKS_YAML}${extraHooksYaml}`;
 
   writeFileSync(wtpYmlPath, content, "utf8");
+  excludeGeneratedArtifact(projectRoot, wtpYmlPath);
   return true;
 }
 
@@ -183,6 +186,7 @@ export function createOrTargetWorktree(
 ): CreateWorktreeResult {
   const resolvedRoot = resolve(projectRoot, worktreeRoot);
   const worktreePath = join(resolvedRoot, branch);
+  excludeGeneratedArtifact(projectRoot, resolvedRoot, true);
 
   let hookOutput = "";
 
@@ -255,10 +259,6 @@ export function createOrTargetWorktree(
     }
   } catch { /* best-effort */ }
 
-  // Ensure the worktree root is in .gitignore (only for relative paths under projectRoot)
-  const relEntry = worktreeRoot.startsWith("/") ? null : worktreeRoot.replace(/\/*$/, "/");
-  if (relEntry) ensureGitignoreEntry(projectRoot, relEntry);
-
   return { path: worktreePath, hookOutput };
 }
 
@@ -321,25 +321,6 @@ export function listWtpWorktrees(
 // ──────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────
-
-/**
- * Append a pattern to .gitignore if not already present.
- */
-export function ensureGitignoreEntry(projectRoot: string, pattern: string): void {
-  const gitignorePath = join(projectRoot, ".gitignore");
-  let existing = "";
-
-  if (existsSync(gitignorePath)) {
-    existing = readFileSync(gitignorePath, "utf8");
-    const lines = existing.split("\n");
-    if (lines.some((l) => l.trim() === pattern)) {
-      return;
-    }
-  }
-
-  const separator = existing.endsWith("\n") || existing.length === 0 ? "" : "\n";
-  appendFileSync(gitignorePath, `${separator}${pattern}\n`, "utf8");
-}
 
 /**
  * Simple shell argument escaping (single-quote wrapping).

@@ -58,6 +58,8 @@ vi.mock("../src/worktrees.js", () => ({
 
 vi.mock("../src/config.js", () => ({
   loadPluginConfig: vi.fn().mockReturnValue({}),
+  areWorktreesEnabled: vi.fn().mockReturnValue(true),
+  isDevcontainerEnabled: vi.fn().mockReturnValue(true),
   resolveWorktreeRoot: vi.fn().mockReturnValue(".pi/worktrees"),
   resolvePostCreateHooks: vi.fn().mockReturnValue([]),
 }));
@@ -146,6 +148,9 @@ function createMockPi(): MockPi {
 
 function makeMockCtx(notifySpy: ReturnType<typeof vi.fn>) {
   return {
+    cwd: "/project",
+    mode: "rpc",
+    hasUI: true,
     ui: {
       notify: notifySpy,
       setStatus: vi.fn(),
@@ -439,6 +444,7 @@ describe("bash-dispatch emit", () => {
         llmCommand: "npm test",
         rtkRewritten: true,
         rtkCommand: "npm test | rtk compress",
+        rtk: "fallback",
         routing: "container",
       }),
     );
@@ -449,6 +455,34 @@ describe("bash-dispatch emit", () => {
     expect(interceptInput.command).not.toContain("rtk compress");
 
     // Restore state so subsequent tests start clean.
+    delete (state as any).devcontainer;
+  });
+
+  it("correlates out-of-order parallel bash results by toolCallId", async () => {
+    const { state } = await import("../src/session.js");
+    const { readStartupOutcome } = await import("../src/devcontainer.js");
+    (state as any).devcontainer = { enabled: true, workspace: "/project", starting: false };
+    vi.mocked(readStartupOutcome).mockReturnValue({
+      outcome: "success",
+      containerId: "abc123def456",
+      remoteWorkspaceFolder: "/project",
+    });
+    const ctx = makeMockCtx(vi.fn());
+
+    for (const [id, command] of [["parallel-a", "npm test"], ["parallel-b", "git status"]] as const) {
+      await pi._emit("tool_execution_start", { toolName: "bash", toolCallId: id, args: { command } });
+      await pi._emit("tool_call", { toolName: "bash", toolCallId: id, input: { command } }, ctx);
+    }
+
+    const resultHandler = pi._handlers.get("tool_result")![0];
+    const host = await resultHandler({
+      toolName: "bash", toolCallId: "parallel-b", content: [{ type: "text", text: "clean" }],
+    });
+    const container = await resultHandler({
+      toolName: "bash", toolCallId: "parallel-a", content: [{ type: "text", text: "passed" }],
+    });
+    expect(host.content[0].text).toBe("[host]\nclean");
+    expect(container.content[0].text).toBe("[container]\npassed");
     delete (state as any).devcontainer;
   });
 

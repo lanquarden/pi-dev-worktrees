@@ -39,6 +39,7 @@ const BRANCH_MAX_LEN = 20;
 
 // Module-level project root — set by registerDashboardUi
 let _projectRoot = "";
+let _worktreesEnabled = true;
 
 // ──────────────────────────────────────────────
 // Footer text builder
@@ -163,8 +164,9 @@ export function invalidateDashboardUi(pi: ExtensionAPI): void {
  * Update the project root after session_start resolves it.
  * Call from session_start once projectRoot is known.
  */
-export function setDashboardProjectRoot(projectRoot: string): void {
+export function setDashboardProjectRoot(projectRoot: string, worktreesEnabled = true): void {
   _projectRoot = projectRoot;
+  _worktreesEnabled = worktreesEnabled;
 }
 
 /**
@@ -174,7 +176,8 @@ export function setDashboardProjectRoot(projectRoot: string): void {
  * handler fires `refreshUiModules`. The `_projectRoot` variable is set
  * separately via `setDashboardProjectRoot` once session_start resolves it.
  */
-export function registerDashboardUi(pi: ExtensionAPI): void {
+export function registerDashboardUi(pi: ExtensionAPI, worktreesEnabled = true): void {
+  _worktreesEnabled = worktreesEnabled;
 
   // ── ui:list-modules probe ──────────────────────────────────────────────
   pi.events.on("ui:list-modules", (probe: { modules: unknown[] }) => {
@@ -197,8 +200,8 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
       });
     }
 
-    // 2. management-modal for /workspaces
-    probe.modules.push({
+    // 2. management-modal is contributed only when this extension owns worktrees.
+    if (_worktreesEnabled) probe.modules.push({
       kind: "management-modal",
       id: MODAL_ID,
       command: MODAL_COMMAND,
@@ -241,12 +244,13 @@ export function registerDashboardUi(pi: ExtensionAPI): void {
 
   // ── workspaces:list data handler ───────────────────────────────────────
   pi.events.on("workspaces:list", (data: { items?: unknown[] }) => {
-    if (!_projectRoot) { data.items = []; return; }
+    if (!_worktreesEnabled || !_projectRoot) { data.items = []; return; }
     data.items = buildWorktreeRows(_projectRoot);
   });
 
   // ── workspaces:delete-row action handler ───────────────────────────────
   pi.events.on("workspaces:delete-row", (data: Record<string, unknown>) => {
+    if (!_worktreesEnabled) return;
     const branch = typeof data.branch === "string" ? data.branch : "";
     if (!branch || !_projectRoot) return;
 

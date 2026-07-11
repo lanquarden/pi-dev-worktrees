@@ -11,6 +11,8 @@ import { join } from "node:path";
 import {
   loadPluginConfig,
   matchRepoGlob,
+  areWorktreesEnabled,
+  isDevcontainerEnabled,
   resolveWorktreeRoot,
   resolvePostCreateHooks,
 } from "../src/config.js";
@@ -73,6 +75,41 @@ describe("loadPluginConfig", () => {
     const warnArg = String(warnSpy.mock.calls[0][0]);
     expect(warnArg).toContain(configPath);
     expect(warnArg.toLowerCase()).toMatch(/json|parse|syntax/i);
+  });
+});
+
+// ── capability flags ──────────────────────────────────────────────────────────
+
+describe("capability flags", () => {
+  it("default both capabilities to enabled", () => {
+    expect(areWorktreesEnabled(null)).toBe(true);
+    expect(isDevcontainerEnabled(null)).toBe(true);
+    expect(areWorktreesEnabled({ repos: [] })).toBe(true);
+    expect(isDevcontainerEnabled({ repos: [] })).toBe(true);
+  });
+
+  it("disables only on explicit false and supports all four combinations", () => {
+    for (const worktrees of [true, false]) {
+      for (const devcontainer of [true, false]) {
+        const config: PluginConfig = {
+          worktrees: { enabled: worktrees },
+          devcontainer: { enabled: devcontainer },
+        };
+        expect(areWorktreesEnabled(config)).toBe(worktrees);
+        expect(isDevcontainerEnabled(config)).toBe(devcontainer);
+      }
+    }
+  });
+
+  it("accepts minimal external-worktree config with omitted repos", () => {
+    const config: PluginConfig = {
+      worktrees: { enabled: false },
+      devcontainer: { enabled: true },
+    };
+    expect(areWorktreesEnabled(config)).toBe(false);
+    expect(isDevcontainerEnabled(config)).toBe(true);
+    expect(resolveWorktreeRoot("", config)).toBe(".pi/worktrees");
+    expect(resolvePostCreateHooks("", config)).toEqual([]);
   });
 });
 
