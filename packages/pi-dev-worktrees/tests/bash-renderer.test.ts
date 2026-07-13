@@ -54,6 +54,31 @@ describe("native bash dispatch call rendering", () => {
     expect(visibleWidth(line)).toBe(70);
   });
 
+  it("restores the parent tool background before Box right padding", () => {
+    const ansiTheme = {
+      fg: (_color: string, text: string) => text,
+      bg: (color: string, text: string) => {
+        const code = color === "toolSuccessBg" ? "48;5;22" : "48;5;24";
+        return `\u001b[${code}m${text}\u001b[49m`;
+      },
+      bold: (text: string) => text,
+    } as any;
+    const ctx = context("background");
+    setBashDispatch("background", {
+      llmCommand: "npm test",
+      routing: "container",
+      containerId: "abc123",
+      rtk: "none",
+      rtkRewritten: false,
+      hasDevcontainer: true,
+      managedWorktree: false,
+    });
+
+    const [line] = createDispatchCallComponent("npm test", ansiTheme, ctx).render(50);
+    expect(visibleWidth(line)).toBe(50);
+    expect(`${line} `).toContain("\u001b[49m\u001b[48;5;22m ");
+  });
+
   it("renders HOST, error, fallback, and managed CWD chips", () => {
     const cases = [
       { id: "host", routing: "host" as const, rtk: "none" as const, hasDevcontainer: true, containerTargetingActive: true, managedWorktree: false, expected: "[HOST]" },
@@ -173,6 +198,47 @@ describe("native bash dispatch call rendering", () => {
     const rendered = registered.renderCall({ command: "wrapped" }, theme, ctx).render(60).join("\n");
     expect(rendered).toContain("$ npm test");
     expect(rendered).toContain("DEV abc123");
+  });
+
+  it("preserves dispatch rendering after metadata cleanup without falling back to the bash header", () => {
+    let registered: any;
+    const pi = {
+      getAllTools: vi.fn().mockReturnValue([{
+        name: "bash",
+        sourceInfo: { source: "builtin", path: "<builtin:bash>" },
+      }]),
+      registerTool: vi.fn((definition) => { registered = definition; }),
+    };
+    registerNativeBashRenderer(pi as any, "/repo", {
+      mode: "tui",
+      ui: { notify: vi.fn() },
+    } as any);
+
+    const initialContext = context("lifecycle");
+    const stockComponent = registered.renderCall({ command: "npm test" }, theme, initialContext);
+
+    setBashDispatch("lifecycle", {
+      llmCommand: "npm test",
+      routing: "container",
+      containerId: "abc123",
+      rtk: "none",
+      rtkRewritten: false,
+      hasDevcontainer: true,
+      containerTargetingActive: true,
+      managedWorktree: false,
+    });
+    const dispatchContext = context("lifecycle");
+    dispatchContext.lastComponent = stockComponent;
+    const dispatchComponent = registered.renderCall({ command: "wrapped" }, theme, dispatchContext);
+    expect(dispatchComponent.render(60).join("\n")).toContain("DEV abc123");
+
+    cleanupBashDispatch("lifecycle");
+    const finalContext = context("lifecycle");
+    finalContext.lastComponent = dispatchComponent;
+    const finalComponent = registered.renderCall({ command: "wrapped" }, theme, finalContext);
+
+    expect(finalComponent).toBe(dispatchComponent);
+    expect(finalComponent.render(60).join("\n")).toContain("DEV abc123");
   });
 
   it("cleans up only matching parallel dispatch metadata", () => {
