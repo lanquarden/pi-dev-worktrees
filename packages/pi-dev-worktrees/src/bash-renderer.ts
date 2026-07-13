@@ -62,28 +62,63 @@ function chipText(metadata: BashDispatchMetadata, theme: ExtensionContext["ui"][
   return chips;
 }
 
+type RenderTheme = ExtensionContext["ui"]["theme"];
+type ToolRowBackground = "toolPendingBg" | "toolSuccessBg" | "toolErrorBg";
+
+interface DispatchCallComponent {
+  readonly kind: "pi-dev-worktrees-dispatch-call";
+  update(command: string, theme: RenderTheme, context: ToolRenderContext): void;
+  render(width: number): string[];
+  invalidate(): void;
+}
+
+function isDispatchCallComponent(component: unknown): component is DispatchCallComponent {
+  return Boolean(component && (component as Partial<DispatchCallComponent>).kind === "pi-dev-worktrees-dispatch-call");
+}
+
+function toolRowBackground(context: ToolRenderContext): ToolRowBackground {
+  return context.isPartial ? "toolPendingBg" : context.isError ? "toolErrorBg" : "toolSuccessBg";
+}
+
+function backgroundStart(theme: RenderTheme, background: ToolRowBackground): string {
+  const reset = "\u001b[49m";
+  const styled = theme.bg(background, "");
+  return styled.endsWith(reset) ? styled.slice(0, -reset.length) : "";
+}
+
 export function createDispatchCallComponent(
   initialCommand: string,
-  theme: ExtensionContext["ui"]["theme"],
+  initialTheme: RenderTheme,
   context: ToolRenderContext,
-) {
+): DispatchCallComponent {
+  const toolCallId = context.toolCallId;
+  let command = initialCommand;
+  let theme = initialTheme;
+  let parentBackground = toolRowBackground(context);
   let lastMetadata: BashDispatchMetadata | undefined;
   return {
+    kind: "pi-dev-worktrees-dispatch-call",
+    update(nextCommand: string, nextTheme: RenderTheme, nextContext: ToolRenderContext) {
+      command = nextCommand;
+      theme = nextTheme;
+      parentBackground = toolRowBackground(nextContext);
+    },
     render(width: number): string[] {
-      lastMetadata = bashDispatchByToolCall.get(context.toolCallId) ?? lastMetadata;
+      lastMetadata = bashDispatchByToolCall.get(toolCallId) ?? lastMetadata;
       if (!lastMetadata || !hasChips(lastMetadata)) {
-        return [truncateToWidth(theme.fg("toolTitle", theme.bold(`$ ${initialCommand}`)), width, "...")];
+        return [truncateToWidth(theme.fg("toolTitle", theme.bold(`$ ${command}`)), width, "...")];
       }
-      const command = theme.fg("toolTitle", theme.bold(`$ ${lastMetadata.llmCommand}`));
+      const renderedCommand = theme.fg("toolTitle", theme.bold(`$ ${lastMetadata.llmCommand}`));
       const chips = chipText(lastMetadata, theme).join(" ");
-      const commandWidth = visibleWidth(command);
+      const restoreParentBackground = backgroundStart(theme, parentBackground);
+      const commandWidth = visibleWidth(renderedCommand);
       const chipsWidth = visibleWidth(chips);
       if (commandWidth + 1 + chipsWidth <= width) {
-        return [command + " ".repeat(width - commandWidth - chipsWidth) + chips];
+        return [renderedCommand + " ".repeat(width - commandWidth - chipsWidth) + chips + restoreParentBackground];
       }
-      const first = truncateToWidth(command, width, "...");
+      const first = truncateToWidth(renderedCommand, width, "...");
       const secondChips = truncateToWidth(chips, width, "...");
-      return [first, " ".repeat(Math.max(0, width - visibleWidth(secondChips))) + secondChips];
+      return [first, " ".repeat(Math.max(0, width - visibleWidth(secondChips))) + secondChips + restoreParentBackground];
     },
     invalidate() {},
   };
@@ -111,6 +146,10 @@ export function registerNativeBashRenderer(
     renderCall(args, theme, context) {
       rendererInvalidators.set(context.toolCallId, context.invalidate);
       const metadata = bashDispatchByToolCall.get(context.toolCallId);
+      if (isDispatchCallComponent(context.lastComponent)) {
+        context.lastComponent.update(metadata?.llmCommand || args.command, theme, context);
+        return context.lastComponent;
+      }
       if (!metadata || !hasChips(metadata)) {
         return stockRenderCall
           ? stockRenderCall(args, theme, context)
